@@ -4,20 +4,20 @@
 本文件用于跟踪 `doc/tasks/` 下各模块任务完成情况。勾选模块前，应先完成对应模块文件内的全部最小任务和验收标准。
 
 ## P0 主流程必做
-- [ ] 00 项目初始化：`00-project-bootstrap.md`
-- [ ] 01 数据库迁移与 ORM：`01-database-orm.md`
-- [ ] 02 用户、认证与权限：`02-auth-user-permission.md`
-- [ ] 03 项目管理：`03-project-management.md`
-- [ ] 04 VDrive 链接校验：`04-vdrive-link-validation.md`
-- [ ] 05 规则配置与版本管理：`05-rule-config-versioning.md`
-- [ ] 06 创建点检任务：`06-inspection-task-creation.md`
-- [ ] 07 生成规则快照：`07-rule-snapshot.md`
-- [ ] 08 生成轮次和检查项：`08-round-item-generation.md`
-- [ ] 09 工程师确认检查项：`09-inspection-item-confirmation.md`
-- [ ] 10 归档当前轮：`10-round-archive.md`
-- [ ] 11 报告生成：`11-report-generation.md`
-- [ ] 12 整改项与待跟进项：`12-rectification-followup.md`
-- [ ] 13 触发复查：`13-recheck.md`
+- [x] 00 项目初始化：`00-project-bootstrap.md`
+- [x] 01 数据库迁移与 ORM：`01-database-orm.md`
+- [x] 02 用户、认证与权限：`02-auth-user-permission.md`
+- [x] 03 项目管理：`03-project-management.md`
+- [x] 04 VDrive 链接校验：`04-vdrive-link-validation.md`
+- [x] 05 规则配置与版本管理：`05-rule-config-versioning.md`
+- [x] 06 创建点检任务：`06-inspection-task-creation.md`
+- [x] 07 生成规则快照：`07-rule-snapshot.md`
+- [x] 08 生成轮次和检查项：`08-round-item-generation.md`
+- [x] 09 工程师确认检查项：`09-inspection-item-confirmation.md`
+- [x] 10 归档当前轮：`10-round-archive.md`
+- [x] 11 报告生成：`11-report-generation.md`
+- [x] 12 整改项与待跟进项：`12-rectification-followup.md`
+- [x] 13 触发复查：`13-recheck.md`
 
 ## P1 增强能力
 - [ ] 14 报告更正：`14-report-correction.md`

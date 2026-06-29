@@ -1,0 +1,20 @@
+[project]
+name = "checkflow-mqd"
+version = "0.1.0"
+description = "CheckFlow / MQD inspection MVP"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.17.0",
+    "fastapi>=0.135.0",
+    "pyjwt>=2.10.0",
+    "sqlalchemy>=2.0.40",
+    "uvicorn>=0.38.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+]
+
+[tool.uv]
+package = false

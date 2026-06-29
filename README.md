@@ -42,8 +42,6 @@ git push
 
 ## 本地启动命令
 
-当前尚未完成工程脚手架，以下命令会在 `00 项目初始化` 实现后补齐。
-
 ### 启动 PostgreSQL
 
 ```bash
@@ -53,25 +51,35 @@ docker compose up -d
 ### 启动后端
 
 ```bash
-# 待补充：FastAPI 本地启动命令
+uv run uvicorn app.main:app --app-dir backend --reload
 ```
 
 ### 启动前端
 
 ```bash
-# 待补充：Next.js 本地启动命令
+cd frontend
+npm install
+npm run dev
 ```
 
 ### 数据库迁移
 
 ```bash
-# 待补充：Alembic 迁移命令
+uv run alembic upgrade head
 ```
 
 ### 种子数据
 
 ```bash
-# 待补充：seed 脚本命令
+PYTHONPATH=backend uv run python -c "from app.core.database import create_schema; from app.seed import seed_database; create_schema(); seed_database()"
+```
+
+### 测试
+
+```bash
+python3 -m unittest backend.tests.test_p0_main_flow -v
+cd frontend
+npm test
 ```
 
 ## Docker 化节奏

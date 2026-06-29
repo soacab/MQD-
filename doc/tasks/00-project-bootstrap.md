@@ -12,21 +12,21 @@
 无。
 
 ## 最小任务清单
-- [ ] T01：创建 `backend/app/` FastAPI 项目骨架；验收：`app/main.py` 暴露 FastAPI 实例。
-- [ ] T02：创建 `backend/app/core/` 配置、数据库、异常、日志、CORS 基础模块；验收：模块可被 `main.py` 正常导入。
-- [ ] T03：创建 `/health` 健康检查接口；验收：本地启动后返回成功状态。
-- [ ] T04：初始化 Alembic 目录；验收：能执行迁移命令并生成迁移文件。
-- [ ] T05：创建 `frontend/` React / Next.js / TypeScript 项目；验收：前端开发服务器可启动。
-- [ ] T06：配置前端基础布局、路由和 API Client；验收：前端页面可请求 `/health` 并展示结果。
-- [ ] T07：配置 Docker Compose PostgreSQL；验收：贡献者可按文档启动 PostgreSQL，并配置后端数据库连接。
-- [ ] T08：补充本地启动与测试命令到项目文档；验收：贡献者可按文档启动前后端。
+- [x] T01：创建 `backend/app/` FastAPI 项目骨架；验收：`app/main.py` 暴露 FastAPI 实例。
+- [x] T02：创建 `backend/app/core/` 配置、数据库、异常、日志、CORS 基础模块；验收：模块可被 `main.py` 正常导入。
+- [x] T03：创建 `/health` 健康检查接口；验收：本地启动后返回成功状态。
+- [x] T04：初始化 Alembic 目录；验收：能执行迁移命令并生成迁移文件。
+- [x] T05：创建 `frontend/` React / Next.js / TypeScript 项目；验收：前端开发服务器可启动。
+- [x] T06：配置前端基础布局、路由和 API Client；验收：前端页面可请求 `/health` 并展示结果。
+- [x] T07：配置 Docker Compose PostgreSQL；验收：贡献者可按文档启动 PostgreSQL，并配置后端数据库连接。
+- [x] T08：补充本地启动与测试命令到项目文档；验收：贡献者可按文档启动前后端。
 
 ## 验收标准
-- [ ] 后端 `/health` 可访问。
-- [ ] 数据库配置入口存在但不要求业务表完成。
-- [ ] PostgreSQL 可通过 Docker Compose 启动，后端可读取对应数据库连接配置。
-- [ ] 前端可启动并调用后端健康检查。
-- [ ] 工程目录与 MVP 文档建议结构一致。
+- [x] 后端 `/health` 可访问。
+- [x] 数据库配置入口存在但不要求业务表完成。
+- [x] PostgreSQL 可通过 Docker Compose 启动，后端可读取对应数据库连接配置。
+- [x] 前端可启动并调用后端健康检查。
+- [x] 工程目录与 MVP 文档建议结构一致。
 
 ## 注意事项
 不要实现业务接口；本模块只建立可运行骨架。
