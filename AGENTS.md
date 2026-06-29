@@ -18,6 +18,10 @@
 - `rg "关键词" .`：快速检索全部设计文档。
 - `open -a "Microsoft Edge" CheckFlow_原型.html`：用 Edge 打开静态原型。
 
+项目初始化阶段优先使用 Docker Compose 提供 PostgreSQL；前后端默认在本机直接运行，不要求一开始整体容器化。
+
+完整跨笔记本开发流程、本地启动策略和 Docker 化节奏以 `README.md` 为准；不要在本文件重复维护完整教程。
+
 代码脚手架加入后，应在本节补充真实命令，例如 `uv run pytest`、`npm test`、`npm run lint`，以及前后端本地启动命令。
 
 ## 编码风格与命名约定
@@ -30,7 +34,7 @@
 
 ## 提交与 Pull Request 规范
 
-当前目录尚未初始化为 Git 仓库，因此没有可参考的历史提交规范。启用 Git 后，使用简短祈使句提交信息，例如 `docs: add API validation notes` 或 `feat: scaffold health check`。PR 应说明变更范围、影响的文档或模块、已执行的验证；涉及 UI 或原型变化时附截图。
+本仓库已使用 Git/GitHub 管理。提交信息使用简短祈使句，例如 `docs: update local development notes` 或 `feat: scaffold health check`。PR 应说明变更范围、影响的文档或模块、已执行的验证；涉及 UI 或原型变化时附截图。
 
 ## 任务文档使用规则
 
