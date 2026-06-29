@@ -17,7 +17,7 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 def run_migrations_offline() -> None:
     context.configure(url=config.get_main_option("sqlalchemy.url"), literal_binds=True)
     with context.begin_transaction():
-        context.execute(SCHEMA_SQL)
+        context.run_migrations()
 
 
 def run_migrations_online() -> None:

@@ -12,6 +12,20 @@ from fastapi import Body, Depends, FastAPI, Header
 from app.core.config import settings
 from app.core.cors import configure_cors
 from app.core.database import create_schema, execute, from_json, query_all, query_one, to_json, transaction
+from app.core.enums import (
+    AdapterType,
+    AutoCheckStatus,
+    InspectionItemStatus,
+    InspectionResult,
+    InspectionRoundStatus,
+    InspectionTaskStatus,
+    Permission,
+    ProjectStatus,
+    ReportOverallResult,
+    RuleItemType,
+    RuleVersionStatus,
+    UserStatus,
+)
 from app.core.exceptions import BusinessError, business_error_handler
 from app.seed import seed_database
 
@@ -77,7 +91,7 @@ def current_user(authorization: str = Header(default="")) -> dict[str, Any]:
         user_id = int(payload["sub"])
     except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
         raise BusinessError("UNAUTHORIZED", "认证信息无效", 401) from exc
-    user = query_one("SELECT * FROM users WHERE id = ? AND status = 'active'", (user_id,))
+    user = query_one("SELECT * FROM users WHERE id = ? AND status = ?", (user_id, UserStatus.ACTIVE))
     if not user:
         raise BusinessError("UNAUTHORIZED", "用户不存在或已停用", 401)
     return user
@@ -85,7 +99,7 @@ def current_user(authorization: str = Header(default="")) -> dict[str, Any]:
 
 def require_permissions(user: dict[str, Any], allowed: set[str]) -> None:
     user_permissions = set(permissions_for_user(user["id"]))
-    if "super_admin" in user_permissions:
+    if Permission.SUPER_ADMIN in user_permissions:
         return
     if not user_permissions.intersection(allowed):
         raise BusinessError("FORBIDDEN", "权限不足", 403)
@@ -119,7 +133,7 @@ def health() -> dict[str, str]:
 @app.post("/api/v1/auth/login")
 def login(payload: dict = Body(...)) -> dict[str, Any]:
     user = query_one("SELECT * FROM users WHERE uid = ?", (payload.get("uid"),))
-    if not user or user["status"] != "active":
+    if not user or user["status"] != UserStatus.ACTIVE:
         raise BusinessError("INVALID_UID", "UID 不存在或已停用", 401)
     if payload.get("password") not in (user["uid"], "admin"):
         raise BusinessError("INVALID_PASSWORD", "密码无效", 401)
@@ -142,7 +156,7 @@ def list_users(
     status: str | None = None,
     user: dict = Depends(current_user),
 ) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
+    require_permissions(user, {Permission.SUPER_ADMIN})
     rows = query_all("SELECT * FROM users ORDER BY id")
     if keyword:
         rows = [r for r in rows if keyword in r["uid"] or keyword in r["name"] or keyword in (r["email"] or "")]
@@ -153,10 +167,10 @@ def list_users(
 
 @app.post("/api/v1/users")
 def create_user(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
+    require_permissions(user, {Permission.SUPER_ADMIN})
     cur = execute(
-        "INSERT INTO users(uid, name, email, status) VALUES (?, ?, ?, 'active')",
-        (payload["uid"], payload["name"], payload.get("email")),
+        "INSERT INTO users(uid, name, email, status) VALUES (?, ?, ?, ?)",
+        (payload["uid"], payload["name"], payload.get("email"), UserStatus.ACTIVE),
     )
     user_id = cur.lastrowid
     for permission in payload.get("permissions", []):
@@ -167,7 +181,7 @@ def create_user(payload: dict = Body(...), user: dict = Depends(current_user)) -
 
 @app.put("/api/v1/users/{user_id}/permissions")
 def update_user_permissions(user_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
+    require_permissions(user, {Permission.SUPER_ADMIN})
     row_or_404("SELECT * FROM users WHERE id = ?", (user_id,), "USER_NOT_FOUND", "用户不存在")
     execute("DELETE FROM user_permissions WHERE user_id = ?", (user_id,))
     for permission in payload.get("permissions", []):
@@ -181,8 +195,9 @@ def ensure_not_last_super_admin(target_user_id: int) -> None:
         """
         SELECT u.id FROM users u
         JOIN user_permissions p ON p.user_id = u.id
-        WHERE u.status = 'active' AND p.permission_code = 'super_admin'
-        """
+        WHERE u.status = ? AND p.permission_code = ?
+        """,
+        (UserStatus.ACTIVE, Permission.SUPER_ADMIN),
     )
     if len(rows) <= 1 and rows and rows[0]["id"] == target_user_id:
         raise BusinessError("LAST_SUPER_ADMIN", "不能停用或删除最后一个权限管理员")
@@ -190,17 +205,17 @@ def ensure_not_last_super_admin(target_user_id: int) -> None:
 
 @app.post("/api/v1/users/{user_id}/disable")
 def disable_user(user_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
+    require_permissions(user, {Permission.SUPER_ADMIN})
     ensure_not_last_super_admin(user_id)
-    execute("UPDATE users SET status = 'disabled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+    execute("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (UserStatus.DISABLED, user_id))
     audit("disable_user", "user", user_id, user["id"])
     return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
 
 
 @app.post("/api/v1/users/{user_id}/enable")
 def enable_user(user_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
-    execute("UPDATE users SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+    require_permissions(user, {Permission.SUPER_ADMIN})
+    execute("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (UserStatus.ACTIVE, user_id))
     audit("enable_user", "user", user_id, user["id"])
     return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
 
@@ -213,7 +228,7 @@ def get_system_settings(_: dict = Depends(current_user)) -> dict[str, Any]:
 
 @app.put("/api/v1/system-settings/{key}")
 def save_system_setting(key: str, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
+    require_permissions(user, {Permission.SUPER_ADMIN})
     execute(
         """
         INSERT INTO system_settings(key, value_json, saved_by, updated_at)
@@ -240,7 +255,7 @@ def list_projects(
     _: dict = Depends(current_user),
 ) -> dict[str, Any]:
     rows = query_all("SELECT * FROM projects ORDER BY id DESC")
-    selected_status = status or "normal"
+    selected_status = status or ProjectStatus.NORMAL
     rows = [row for row in rows if row["status"] == selected_status]
     if keyword:
         rows = [row for row in rows if keyword in row["project_name"] or keyword in row["customer"]]
@@ -272,7 +287,7 @@ def get_project(project_id: int, _: dict = Depends(current_user)) -> dict[str, A
 
 @app.post("/api/v1/projects")
 def create_project(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"project_admin"})
+    require_permissions(user, {Permission.PROJECT_ADMIN})
     for field in ("project_name", "customer", "receive_date"):
         if not payload.get(field):
             raise BusinessError("PROJECT_REQUIRED_FIELD", f"缺少必填字段 {field}")
@@ -330,9 +345,9 @@ def add_project_order_rows(project_id: int, receive_date: str, models: list[str]
 
 @app.patch("/api/v1/projects/{project_id}")
 def update_project(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"project_admin"})
+    require_permissions(user, {Permission.PROJECT_ADMIN})
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
-    if project["status"] == "deleted":
+    if project["status"] == ProjectStatus.DELETED:
         raise BusinessError("PROJECT_DELETED", "已删除项目不能编辑")
     fields = ["project_name", "customer", "project_category", "bu", "project_level", "mq_user_id", "mp_owner", "group_name", "planned_mp_date", "production_line"]
     for field in fields:
@@ -344,9 +359,9 @@ def update_project(project_id: int, payload: dict = Body(...), user: dict = Depe
 
 @app.post("/api/v1/projects/{project_id}/vdrive-link")
 def update_project_vdrive(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"project_admin"})
+    require_permissions(user, {Permission.PROJECT_ADMIN})
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
-    if project["status"] != "normal":
+    if project["status"] != ProjectStatus.NORMAL:
         raise BusinessError("PROJECT_DELETED", "已删除项目不能修改 VDrive")
     vdrive = parse_vdrive_url(payload.get("vdrive_url", ""))
     execute(
@@ -362,9 +377,9 @@ def update_project_vdrive(project_id: int, payload: dict = Body(...), user: dict
 
 @app.post("/api/v1/projects/{project_id}/orders")
 def add_project_order(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"project_admin"})
+    require_permissions(user, {Permission.PROJECT_ADMIN})
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
-    if project["status"] != "normal":
+    if project["status"] != ProjectStatus.NORMAL:
         raise BusinessError("PROJECT_DELETED", "已删除项目不能加单")
     order_id = add_project_order_rows(project_id, payload["receive_date"], payload.get("models", []), user["id"])
     audit("add_project_order", "project", project_id, user["id"], payload)
@@ -373,16 +388,16 @@ def add_project_order(project_id: int, payload: dict = Body(...), user: dict = D
 
 @app.delete("/api/v1/projects/{project_id}")
 def delete_project(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"project_admin"})
+    require_permissions(user, {Permission.PROJECT_ADMIN})
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
     if payload.get("confirm_project_name") != project["project_name"]:
         raise BusinessError("PROJECT_CONFIRM_NAME_MISMATCH", "项目名称确认不匹配")
     execute(
         """
-        UPDATE projects SET status = 'deleted', deleted_by = ?, deleted_at = CURRENT_TIMESTAMP,
+        UPDATE projects SET status = ?, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP,
         delete_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
         """,
-        (user["id"], payload.get("delete_reason"), project_id),
+        (ProjectStatus.DELETED, user["id"], payload.get("delete_reason"), project_id),
     )
     audit("delete_project", "project", project_id, user["id"], payload)
     return ok(project_detail(query_one("SELECT * FROM projects WHERE id = ?", (project_id,))))
@@ -405,7 +420,7 @@ def list_rule_versions(qg_node_id: int | None = None, status: str | None = None,
 
 @app.post("/api/v1/business-rule-versions")
 def create_rule_version(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     cur = execute(
         "INSERT INTO business_rule_versions(qg_node_id, version_no, change_summary, created_by) VALUES (?, ?, ?, ?)",
         (payload["qg_node_id"], payload["version_no"], payload.get("change_summary"), user["id"]),
@@ -429,9 +444,9 @@ def get_rule_version(version_id: int, _: dict = Depends(current_user)) -> dict[s
 
 @app.post("/api/v1/business-rule-versions/{version_id}/business-check-rules")
 def create_business_rule(version_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     version = row_or_404("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,), "RULE_VERSION_NOT_FOUND", "规则版本不存在")
-    if version["status"] != "draft":
+    if version["status"] != RuleVersionStatus.DRAFT:
         raise BusinessError("RULE_VERSION_NOT_DRAFT", "只有草稿规则版本可编辑")
     cur = execute(
         """
@@ -460,7 +475,7 @@ def create_business_rule(version_id: int, payload: dict = Body(...), user: dict 
 
 @app.patch("/api/v1/business-check-rules/{rule_id}")
 def update_business_rule(rule_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_rule(rule_id)
     for field in ("item_name", "item_type", "check_type", "checklist_requirement", "owner_dept", "sort_order"):
         if field in payload:
@@ -475,7 +490,7 @@ def update_business_rule(rule_id: int, payload: dict = Body(...), user: dict = D
 
 @app.post("/api/v1/business-check-rules/{rule_id}/auto-check-execution-rules")
 def create_execution_rule(rule_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_rule(rule_id)
     cur = execute(
         """
@@ -501,7 +516,7 @@ def create_execution_rule(rule_id: int, payload: dict = Body(...), user: dict = 
 
 @app.patch("/api/v1/auto-check-execution-rules/{execution_rule_id}")
 def update_execution_rule(execution_rule_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_execution_rule(execution_rule_id)
     for field in ("execution_code", "execution_mode", "adapter_type", "config_version"):
         if field in payload:
@@ -515,7 +530,7 @@ def update_execution_rule(execution_rule_id: int, payload: dict = Body(...), use
 
 @app.post("/api/v1/auto-check-execution-rules/{execution_rule_id}/enable")
 def enable_execution_rule(execution_rule_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_execution_rule(execution_rule_id)
     execute("UPDATE auto_check_execution_rules SET is_enabled = 1 WHERE id = ?", (execution_rule_id,))
     return ok(query_one("SELECT * FROM auto_check_execution_rules WHERE id = ?", (execution_rule_id,)))
@@ -523,7 +538,7 @@ def enable_execution_rule(execution_rule_id: int, user: dict = Depends(current_u
 
 @app.post("/api/v1/auto-check-execution-rules/{execution_rule_id}/disable")
 def disable_execution_rule(execution_rule_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_execution_rule(execution_rule_id)
     execute("UPDATE auto_check_execution_rules SET is_enabled = 0 WHERE id = ?", (execution_rule_id,))
     return ok(query_one("SELECT * FROM auto_check_execution_rules WHERE id = ?", (execution_rule_id,)))
@@ -531,13 +546,13 @@ def disable_execution_rule(execution_rule_id: int, user: dict = Depends(current_
 
 @app.post("/api/v1/business-rule-versions/{version_id}/publish")
 def publish_rule_version(version_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
+    require_permissions(user, {Permission.RULES_ADMIN})
     version = row_or_404("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,), "RULE_VERSION_NOT_FOUND", "规则版本不存在")
-    if version["status"] != "draft":
+    if version["status"] != RuleVersionStatus.DRAFT:
         raise BusinessError("RULE_VERSION_NOT_DRAFT", "只有草稿版本可发布")
     rules = query_all("SELECT * FROM business_check_rules WHERE business_rule_version_id = ? AND is_active = 1", (version_id,))
     for rule in rules:
-        if rule["item_type"] in ("auto", "system"):
+        if rule["item_type"] in (RuleItemType.AUTO, RuleItemType.SYSTEM):
             execution = query_one(
                 "SELECT id FROM auto_check_execution_rules WHERE business_check_rule_id = ? AND is_enabled = 1",
                 (rule["id"],),
@@ -546,12 +561,12 @@ def publish_rule_version(version_id: int, user: dict = Depends(current_user)) ->
                 raise BusinessError("AUTO_RULE_MISSING_EXECUTION", "自动检查项缺少启用的执行规则")
     with transaction():
         execute(
-            "UPDATE business_rule_versions SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE qg_node_id = ? AND status = 'published'",
-            (version["qg_node_id"],),
+            "UPDATE business_rule_versions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE qg_node_id = ? AND status = ?",
+            (RuleVersionStatus.DEPRECATED, version["qg_node_id"], RuleVersionStatus.PUBLISHED),
         )
         execute(
-            "UPDATE business_rule_versions SET status = 'published', published_by = ?, published_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (user["id"], version_id),
+            "UPDATE business_rule_versions SET status = ?, published_by = ?, published_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (RuleVersionStatus.PUBLISHED, user["id"], version_id),
         )
         audit("publish_rule_version", "business_rule_version", version_id, user["id"])
     return ok(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,)))
@@ -560,7 +575,7 @@ def publish_rule_version(version_id: int, user: dict = Depends(current_user)) ->
 def ensure_rule_version_draft_for_rule(rule_id: int) -> dict[str, Any]:
     rule = row_or_404("SELECT * FROM business_check_rules WHERE id = ?", (rule_id,), "BUSINESS_RULE_NOT_FOUND", "业务规则不存在")
     version = query_one("SELECT * FROM business_rule_versions WHERE id = ?", (rule["business_rule_version_id"],))
-    if version["status"] != "draft":
+    if version["status"] != RuleVersionStatus.DRAFT:
         raise BusinessError("RULE_VERSION_NOT_DRAFT", "已发布或已废弃规则版本不可编辑")
     return rule
 
@@ -578,8 +593,8 @@ def ensure_rule_version_draft_for_execution_rule(execution_rule_id: int) -> dict
 
 @app.post("/api/v1/business-rule-versions/{version_id}/deprecate")
 def deprecate_rule_version(version_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"rules_admin"})
-    execute("UPDATE business_rule_versions SET status = 'deprecated' WHERE id = ?", (version_id,))
+    require_permissions(user, {Permission.RULES_ADMIN})
+    execute("UPDATE business_rule_versions SET status = ? WHERE id = ?", (RuleVersionStatus.DEPRECATED, version_id))
     audit("deprecate_rule_version", "business_rule_version", version_id, user["id"])
     return ok(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,)))
 
@@ -602,21 +617,21 @@ def build_rule_snapshots(version_id: int) -> tuple[list[dict[str, Any]], list[di
 
 @app.post("/api/v1/inspection-tasks")
 def create_inspection_task(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (payload["project_id"],), "PROJECT_NOT_FOUND", "项目不存在")
-    if project["status"] != "normal":
+    if project["status"] != ProjectStatus.NORMAL:
         raise BusinessError("PROJECT_DELETED", "已删除项目不能创建点检任务")
     if not project["vdrive_folder_guid"] or not project["vdrive_folder_id"]:
         raise BusinessError("PROJECT_VDRIVE_REQUIRED", "项目缺少 VDrive 文件夹标识")
     version = query_one(
-        "SELECT * FROM business_rule_versions WHERE qg_node_id = ? AND status = 'published' ORDER BY id DESC LIMIT 1",
-        (payload["qg_node_id"],),
+        "SELECT * FROM business_rule_versions WHERE qg_node_id = ? AND status = ? ORDER BY id DESC LIMIT 1",
+        (payload["qg_node_id"], RuleVersionStatus.PUBLISHED),
     )
     if not version:
         raise BusinessError("PUBLISHED_RULE_VERSION_REQUIRED", "当前 QG 节点没有已发布规则版本")
     active = query_one(
-        "SELECT * FROM inspection_tasks WHERE project_id = ? AND qg_node_id = ? AND status IN ('running', 'rectifying')",
-        (payload["project_id"], payload["qg_node_id"]),
+        "SELECT * FROM inspection_tasks WHERE project_id = ? AND qg_node_id = ? AND status IN (?, ?)",
+        (payload["project_id"], payload["qg_node_id"], InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING),
     )
     if active:
         raise BusinessError("ACTIVE_TASK_EXISTS", "同项目同节点已有进行中或整改中任务")
@@ -626,9 +641,9 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
         cur = execute(
             """
             INSERT INTO inspection_tasks(project_id, qg_node_id, task_no, status, current_round_no, created_by)
-            VALUES (?, ?, ?, 'running', 1, ?)
+            VALUES (?, ?, ?, ?, 1, ?)
             """,
-            (payload["project_id"], payload["qg_node_id"], task_no, user["id"]),
+            (payload["project_id"], payload["qg_node_id"], task_no, InspectionTaskStatus.RUNNING, user["id"]),
         )
         task_id = cur.lastrowid
         business_snapshot, execution_snapshot = build_rule_snapshots(version["id"])
@@ -642,8 +657,8 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
             (task_id, version["id"], to_json(business_snapshot), to_json(execution_snapshot)),
         )
         round_cur = execute(
-            "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, 1, 'running')",
-            (task_id,),
+            "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, 1, ?)",
+            (task_id, InspectionRoundStatus.RUNNING),
         )
         round_id = round_cur.lastrowid
         generate_items_for_round(task_id, round_id, business_snapshot, execution_snapshot)
@@ -662,7 +677,7 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
             "inspection_task_id": task_id,
             "project_id": project["id"],
             "qg_node_id": payload["qg_node_id"],
-            "status": "running",
+            "status": InspectionTaskStatus.RUNNING.value,
             "current_round_no": 1,
             "round_id": round_id,
             "rule_snapshot_id": snapshot_cur.lastrowid,
@@ -676,14 +691,14 @@ def generate_items_for_round(task_id: int, round_id: int, business_snapshot: lis
     for rule in business_snapshot:
         if only_rule_codes is not None and rule["rule_code"] not in only_rule_codes:
             continue
-        if rule["item_type"] == "inherit":
-            status = "inherited"
-            final_result = "inherit"
-        elif rule["item_type"] in ("auto", "system") and rule["id"] in execution_rules_by_business_rule_id:
-            status = "pending"
+        if rule["item_type"] == RuleItemType.INHERIT:
+            status = InspectionItemStatus.INHERITED
+            final_result = InspectionResult.INHERIT
+        elif rule["item_type"] in (RuleItemType.AUTO, RuleItemType.SYSTEM) and rule["id"] in execution_rules_by_business_rule_id:
+            status = InspectionItemStatus.PENDING
             final_result = None
         else:
-            status = "manual_required"
+            status = InspectionItemStatus.MANUAL_REQUIRED
             final_result = None
         cur = execute(
             """
@@ -709,7 +724,7 @@ def generate_items_for_round(task_id: int, round_id: int, business_snapshot: lis
                 final_result,
             ),
         )
-        if status == "pending":
+        if status == InspectionItemStatus.PENDING:
             run_mock_auto_check(cur.lastrowid, execution_rules_by_business_rule_id[rule["id"]])
 
 
@@ -720,17 +735,19 @@ def run_mock_auto_check(item_id: int, execution_rule_snapshot: dict[str, Any]) -
             inspection_item_id, attempt_no, is_latest, auto_status, auto_result,
             confidence, evidence_text, source_system, execution_rule_snapshot,
             raw_result_json, started_at, finished_at
-        ) VALUES (?, 1, 1, 'success', 'pass', 0.9, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES (?, 1, 1, ?, ?, 0.9, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """,
         (
             item_id,
+            AutoCheckStatus.SUCCESS,
+            InspectionResult.PASS,
             "Mock adapter found matching evidence; engineer confirmation is still required.",
-            execution_rule_snapshot.get("adapter_type", "mock"),
+            execution_rule_snapshot.get("adapter_type", AdapterType.MOCK),
             to_json(execution_rule_snapshot),
             to_json({"mock": True}),
         ),
     )
-    execute("UPDATE inspection_items SET status = 'auto_completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (item_id,))
+    execute("UPDATE inspection_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionItemStatus.AUTO_COMPLETED, item_id))
 
 
 @app.get("/api/v1/inspection-tasks")
@@ -758,8 +775,8 @@ def get_inspection_task(task_id: int, _: dict = Depends(current_user)) -> dict[s
     task["current_round"] = current_round
     task["summary"] = {
         "total_items": len(items),
-        "confirmed_count": len([i for i in items if i["status"] in ("confirmed", "inherited")]),
-        "pending_count": len([i for i in items if i["status"] not in ("confirmed", "inherited")]),
+        "confirmed_count": len([i for i in items if i["status"] in (InspectionItemStatus.CONFIRMED, InspectionItemStatus.INHERITED)]),
+        "pending_count": len([i for i in items if i["status"] not in (InspectionItemStatus.CONFIRMED, InspectionItemStatus.INHERITED)]),
     }
     return ok(task)
 
@@ -787,27 +804,27 @@ def get_inspection_item(item_id: int, _: dict = Depends(current_user)) -> dict[s
 
 @app.post("/api/v1/inspection-items/{item_id}/convert-to-manual")
 def convert_to_manual(item_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     item = row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
     ensure_item_mutable(item)
-    execute("UPDATE inspection_items SET status = 'manual_required', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (item_id,))
+    execute("UPDATE inspection_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionItemStatus.MANUAL_REQUIRED, item_id))
     audit("convert_to_manual", "inspection_item", item_id, user["id"], payload)
     return ok(query_one("SELECT * FROM inspection_items WHERE id = ?", (item_id,)))
 
 
 @app.post("/api/v1/inspection-items/{item_id}/confirm")
 def confirm_item(item_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     item = row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
     ensure_item_mutable(item)
     result = payload.get("decision_result")
-    if result not in ("pass", "fail", "conditional", "na"):
+    if result not in (InspectionResult.PASS, InspectionResult.FAIL, InspectionResult.CONDITIONAL, InspectionResult.NA):
         raise BusinessError("INVALID_DECISION_RESULT", "结论必须是 pass、fail、conditional 或 na")
     if not payload.get("decision_text"):
         raise BusinessError("DECISION_TEXT_REQUIRED", "判断说明必填")
-    if result == "fail" and (not payload.get("responsible_owner") or not payload.get("planned_finish_date")):
+    if result == InspectionResult.FAIL and (not payload.get("responsible_owner") or not payload.get("planned_finish_date")):
         raise BusinessError("FAIL_FIELDS_REQUIRED", "不满足结论必须填写责任人、计划完成时间和说明")
-    if result == "conditional" and (not payload.get("countermeasure") or not payload.get("responsible_owner") or not payload.get("planned_finish_date")):
+    if result == InspectionResult.CONDITIONAL and (not payload.get("countermeasure") or not payload.get("responsible_owner") or not payload.get("planned_finish_date")):
         raise BusinessError("CONDITIONAL_FIELDS_REQUIRED", "带条件满足必须填写对策、责任人和计划完成时间")
     cur = execute(
         """
@@ -829,8 +846,8 @@ def confirm_item(item_id: int, payload: dict = Body(...), user: dict = Depends(c
         ),
     )
     execute(
-        "UPDATE inspection_items SET final_result = ?, status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (result, item_id),
+        "UPDATE inspection_items SET final_result = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (result, InspectionItemStatus.CONFIRMED, item_id),
     )
     audit("confirm_item", "inspection_item", item_id, user["id"], payload)
     return ok({"item": query_one("SELECT * FROM inspection_items WHERE id = ?", (item_id,)), "decision_id": cur.lastrowid})
@@ -839,15 +856,15 @@ def confirm_item(item_id: int, payload: dict = Body(...), user: dict = Depends(c
 def ensure_item_mutable(item: dict[str, Any]) -> None:
     task = query_one("SELECT * FROM inspection_tasks WHERE id = ?", (item["inspection_task_id"],))
     round_row = query_one("SELECT * FROM inspection_rounds WHERE id = ?", (item["inspection_round_id"],))
-    if task["status"] != "running" or round_row["status"] != "running":
+    if task["status"] != InspectionTaskStatus.RUNNING or round_row["status"] != InspectionRoundStatus.RUNNING:
         raise BusinessError("ITEM_NOT_MUTABLE", "当前检查项不允许修改")
 
 
 @app.post("/api/v1/inspection-tasks/{task_id}/archive-current-round")
 def archive_current_round(task_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
-    if task["status"] != "running":
+    if task["status"] != InspectionTaskStatus.RUNNING:
         raise BusinessError("INSPECTION_TASK_NOT_RUNNING", "当前任务不是进行中状态，无法归档")
     round_row = row_or_404(
         "SELECT * FROM inspection_rounds WHERE inspection_task_id = ? AND round_no = ?",
@@ -855,31 +872,31 @@ def archive_current_round(task_id: int, user: dict = Depends(current_user)) -> d
         "ROUND_NOT_FOUND",
         "当前轮不存在",
     )
-    if round_row["status"] != "running":
+    if round_row["status"] != InspectionRoundStatus.RUNNING:
         raise BusinessError("ROUND_NOT_RUNNING", "当前轮不是进行中状态")
     items = query_all("SELECT * FROM inspection_items WHERE inspection_round_id = ? ORDER BY sort_order", (round_row["id"],))
-    unfinished = [item for item in items if item["status"] not in ("confirmed", "inherited")]
+    unfinished = [item for item in items if item["status"] not in (InspectionItemStatus.CONFIRMED, InspectionItemStatus.INHERITED)]
     if unfinished:
         raise BusinessError("ROUND_HAS_UNFINISHED_ITEMS", "存在未确认检查项", details={"item_ids": [i["id"] for i in unfinished]})
     results = [item["final_result"] for item in items]
-    if "fail" in results:
-        overall_result = "NO_GO"
-        task_status = "rectifying"
-    elif "conditional" in results:
-        overall_result = "C_GO"
-        task_status = "completed"
+    if InspectionResult.FAIL in results:
+        overall_result = ReportOverallResult.NO_GO
+        task_status = InspectionTaskStatus.RECTIFYING
+    elif InspectionResult.CONDITIONAL in results:
+        overall_result = ReportOverallResult.C_GO
+        task_status = InspectionTaskStatus.COMPLETED
     else:
-        overall_result = "FULL_GO"
-        task_status = "completed"
+        overall_result = ReportOverallResult.FULL_GO
+        task_status = InspectionTaskStatus.COMPLETED
     with transaction():
-        execute("UPDATE inspection_rounds SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ?", (round_row["id"],))
+        execute("UPDATE inspection_rounds SET status = ?, archived_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionRoundStatus.ARCHIVED, round_row["id"]))
         execute(
             """
             UPDATE inspection_tasks SET status = ?, archived_at = CURRENT_TIMESTAMP,
-            completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
+            completed_at = CASE WHEN ? = ? THEN CURRENT_TIMESTAMP ELSE completed_at END,
             last_operated_at = CURRENT_TIMESTAMP WHERE id = ?
             """,
-            (task_status, task_status, task_id),
+            (task_status, task_status, InspectionTaskStatus.COMPLETED, task_id),
         )
         rectification_count, followup_count = generate_work_items(task, round_row, items, user["id"])
         report = update_report(task_id, round_row, items, overall_result)
@@ -888,8 +905,8 @@ def archive_current_round(task_id: int, user: dict = Depends(current_user)) -> d
         {
             "inspection_task_id": task_id,
             "archived_round_no": round_row["round_no"],
-            "overall_result": overall_result,
-            "task_status": task_status,
+            "overall_result": overall_result.value,
+            "task_status": task_status.value,
             "generated_rectification_count": rectification_count,
             "generated_followup_count": followup_count,
             "report_id": report["id"],
@@ -906,7 +923,7 @@ def generate_work_items(task: dict[str, Any], round_row: dict[str, Any], items: 
     followup_count = 0
     for item in items:
         decision = latest_decision(item["id"]) or {}
-        if item["final_result"] == "fail" and not query_one("SELECT id FROM rectification_items WHERE source_item_id = ?", (item["id"],)):
+        if item["final_result"] == InspectionResult.FAIL and not query_one("SELECT id FROM rectification_items WHERE source_item_id = ?", (item["id"],)):
             execute(
                 """
                 INSERT INTO rectification_items(
@@ -926,7 +943,7 @@ def generate_work_items(task: dict[str, Any], round_row: dict[str, Any], items: 
                 ),
             )
             rectification_count += 1
-        if item["final_result"] == "conditional" and not query_one("SELECT id FROM followup_items WHERE source_item_id = ?", (item["id"],)):
+        if item["final_result"] == InspectionResult.CONDITIONAL and not query_one("SELECT id FROM followup_items WHERE source_item_id = ?", (item["id"],)):
             execute(
                 """
                 INSERT INTO followup_items(
@@ -959,7 +976,7 @@ def update_report(task_id: int, round_row: dict[str, Any], items: list[dict[str,
         (
             overall_result,
             round_row["round_no"],
-            to_json({"total": len(items), "fail": len([i for i in items if i["final_result"] == "fail"])}),
+            to_json({"total": len(items), "fail": len([i for i in items if i["final_result"] == InspectionResult.FAIL])}),
             report["id"],
         ),
     )
@@ -1011,13 +1028,13 @@ def update_report(task_id: int, round_row: dict[str, Any], items: list[dict[str,
 
 @app.post("/api/v1/inspection-tasks/{task_id}/void")
 def void_task(task_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
-    if task["status"] not in ("running", "rectifying"):
+    if task["status"] not in (InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING):
         raise BusinessError("TASK_CANNOT_BE_VOIDED", "当前状态不能作废")
     execute(
-        "UPDATE inspection_tasks SET status = 'voided', voided_by = ?, voided_at = CURRENT_TIMESTAMP, void_reason = ? WHERE id = ?",
-        (user["id"], payload.get("void_reason"), task_id),
+        "UPDATE inspection_tasks SET status = ?, voided_by = ?, voided_at = CURRENT_TIMESTAMP, void_reason = ? WHERE id = ?",
+        (InspectionTaskStatus.VOIDED, user["id"], payload.get("void_reason"), task_id),
     )
     audit("void_task", "inspection_task", task_id, user["id"], payload)
     return ok(query_one("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,)))
@@ -1035,7 +1052,7 @@ def list_rectifications(task_id: int | None = None, project_id: int | None = Non
 
 @app.post("/api/v1/rectification-items/{rectification_id}/mark-done")
 def mark_rectification_done(rectification_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     row_or_404("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,), "RECTIFICATION_NOT_FOUND", "整改项不存在")
     with transaction():
         execute(
@@ -1048,10 +1065,10 @@ def mark_rectification_done(rectification_id: int, user: dict = Depends(current_
 
 @app.post("/api/v1/rectification-items/{rectification_id}/undo-done")
 def undo_rectification_done(rectification_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     item = row_or_404("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,), "RECTIFICATION_NOT_FOUND", "整改项不存在")
     task = query_one("SELECT * FROM inspection_tasks WHERE id = ?", (item["inspection_task_id"],))
-    if task["status"] != "rectifying":
+    if task["status"] != InspectionTaskStatus.RECTIFYING:
         raise BusinessError("RECTIFICATION_UNDO_FORBIDDEN", "复查触发后不能撤销整改完成")
     execute(
         "UPDATE rectification_items SET marked_done_by = NULL, marked_done_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -1070,7 +1087,7 @@ def list_followups(task_id: int | None = None, _: dict = Depends(current_user)) 
 
 @app.post("/api/v1/followup-items/{followup_id}/close")
 def close_followup(followup_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     row_or_404("SELECT * FROM followup_items WHERE id = ?", (followup_id,), "FOLLOWUP_NOT_FOUND", "待跟进项不存在")
     execute("UPDATE followup_items SET closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"], followup_id))
     return ok(query_one("SELECT * FROM followup_items WHERE id = ?", (followup_id,)))
@@ -1078,9 +1095,9 @@ def close_followup(followup_id: int, user: dict = Depends(current_user)) -> dict
 
 @app.post("/api/v1/inspection-tasks/{task_id}/trigger-recheck")
 def trigger_recheck(task_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"inspection_engineer"})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
-    if task["status"] != "rectifying":
+    if task["status"] != InspectionTaskStatus.RECTIFYING:
         raise BusinessError("TASK_NOT_RECTIFYING", "任务不在整改中，不能触发复查")
     current_round = row_or_404(
         "SELECT * FROM inspection_rounds WHERE inspection_task_id = ? AND round_no = ?",
@@ -1088,31 +1105,31 @@ def trigger_recheck(task_id: int, user: dict = Depends(current_user)) -> dict[st
         "ROUND_NOT_FOUND",
         "当前轮不存在",
     )
-    if current_round["status"] != "archived":
+    if current_round["status"] != InspectionRoundStatus.ARCHIVED:
         raise BusinessError("LATEST_ROUND_NOT_ARCHIVED", "最新轮次未归档")
     undone = query_all("SELECT id FROM rectification_items WHERE inspection_task_id = ? AND marked_done_at IS NULL", (task_id,))
     if undone:
         raise BusinessError("RECTIFICATION_NOT_DONE", "存在未完成整改项")
     fail_items = query_all(
-        "SELECT * FROM inspection_items WHERE inspection_round_id = ? AND final_result = 'fail' ORDER BY sort_order",
-        (current_round["id"],),
+        "SELECT * FROM inspection_items WHERE inspection_round_id = ? AND final_result = ? ORDER BY sort_order",
+        (current_round["id"], InspectionResult.FAIL),
     )
     with transaction():
         new_round_no = task["current_round_no"] + 1
         round_cur = execute(
-            "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, ?, 'running')",
-            (task_id, new_round_no),
+            "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, ?, ?)",
+            (task_id, new_round_no, InspectionRoundStatus.RUNNING),
         )
         snapshot = query_one("SELECT * FROM rule_snapshots WHERE inspection_task_id = ?", (task_id,))
         business_snapshot = from_json(snapshot["business_rule_snapshot_json"], [])
         execution_snapshot = from_json(snapshot["auto_check_execution_rule_snapshot_json"], [])
         generate_items_for_round(task_id, round_cur.lastrowid, business_snapshot, execution_snapshot, {item["source_rule_code"] for item in fail_items})
-        execute("UPDATE inspection_tasks SET status = 'running', current_round_no = ?, last_operated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_round_no, task_id))
+        execute("UPDATE inspection_tasks SET status = ?, current_round_no = ?, last_operated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionTaskStatus.RUNNING, new_round_no, task_id))
         audit("trigger_recheck", "inspection_task", task_id, user["id"], {"new_round_no": new_round_no})
     return ok(
         {
             "inspection_task_id": task_id,
-            "task_status": "running",
+            "task_status": InspectionTaskStatus.RUNNING.value,
             "new_round_id": round_cur.lastrowid,
             "new_round_no": new_round_no,
             "generated_items_count": len(fail_items),
@@ -1169,7 +1186,7 @@ def get_report(report_id: int, _: dict = Depends(current_user)) -> dict[str, Any
 
 @app.get("/api/v1/audit-logs")
 def list_audit_logs(user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {"super_admin"})
+    require_permissions(user, {Permission.SUPER_ADMIN})
     return ok({"items": query_all("SELECT * FROM audit_logs ORDER BY id DESC")})
 
 

@@ -1,14 +1,15 @@
 from app.core.database import execute, query_one, to_json
+from app.core.enums import Permission, SystemSettingKey, UserStatus
 
 
 def seed_database() -> None:
     if not query_one("SELECT id FROM users WHERE uid = ?", ("admin",)):
         execute(
             "INSERT INTO users(uid, name, email, status) VALUES (?, ?, ?, ?)",
-            ("admin", "系统管理员", "admin@example.com", "active"),
+            ("admin", "系统管理员", "admin@example.com", UserStatus.ACTIVE),
         )
         admin = query_one("SELECT id FROM users WHERE uid = ?", ("admin",))
-        for permission in ("super_admin", "inspection_engineer", "rules_admin", "project_admin"):
+        for permission in (Permission.SUPER_ADMIN, Permission.INSPECTION_ENGINEER, Permission.RULES_ADMIN, Permission.PROJECT_ADMIN):
             execute(
                 "INSERT INTO user_permissions(user_id, permission_code) VALUES (?, ?)",
                 (admin["id"], permission),
@@ -21,8 +22,8 @@ def seed_database() -> None:
                 (code, code, sort_order),
             )
 
-    if not query_one("SELECT key FROM system_settings WHERE key = ?", ("auto_check_enabled",)):
+    if not query_one("SELECT key FROM system_settings WHERE key = ?", (SystemSettingKey.AUTO_CHECK_ENABLED,)):
         execute(
             "INSERT INTO system_settings(key, value_json, saved_by) VALUES (?, ?, ?)",
-            ("auto_check_enabled", to_json(True), 1),
+            (SystemSettingKey.AUTO_CHECK_ENABLED, to_json(True), 1),
         )
