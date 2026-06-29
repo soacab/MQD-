@@ -201,7 +201,9 @@ nav a:hover {
 }
 
 .form-panel input,
-.form-panel select {
+.form-panel select,
+.form-panel textarea,
+.inline-form input {
   width: 100%;
   min-height: 38px;
   border: 1px solid #cfd6df;
@@ -212,7 +214,15 @@ nav a:hover {
   background: #fff;
 }
 
-.form-panel button {
+.form-panel textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.form-panel button,
+.module button,
+.secondary-button,
+.inline-form button {
   min-height: 38px;
   border: 0;
   border-radius: 6px;
@@ -223,8 +233,120 @@ nav a:hover {
   cursor: pointer;
 }
 
-.form-panel button:hover {
+.form-panel button:hover,
+.module button:hover,
+.inline-form button:hover {
   background: #1d4d92;
+}
+
+.form-panel button:disabled,
+.module button:disabled,
+.inline-form button:disabled {
+  cursor: not-allowed;
+  background: #9aa9bd;
+}
+
+.secondary-button {
+  background: #eef2f7;
+  color: #253041;
+  border: 1px solid #cfd6df;
+}
+
+.secondary-button:hover {
+  background: #dfe7f1;
+}
+
+.button-row,
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.inline-form {
+  margin-top: 14px;
+}
+
+.inline-form input {
+  width: min(260px, 100%);
+}
+
+.notice {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #cfd6df;
+  border-radius: 8px;
+  background: #fff;
+  color: #253041;
+  line-height: 1.5;
+}
+
+.spaced {
+  margin-top: 16px;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.stack p {
+  margin: 0;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-grid p {
+  margin: 0;
+}
+
+.three-column {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.plain-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 10px 0;
+  list-style: none;
+}
+
+.link-button {
+  width: 100%;
+  text-align: left;
+  background: #eef4ff;
+  color: #1d4d92;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th,
+td {
+  padding: 10px;
+  border-bottom: 1px solid #e0e4ea;
+  text-align: left;
+  vertical-align: top;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover {
+  background: #f3f6fb;
 }
 
 .filters {
@@ -250,7 +372,9 @@ nav a:hover {
   .summary,
   .grid,
   .two-column,
-  .filters {
+  .three-column,
+  .filters,
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 }
