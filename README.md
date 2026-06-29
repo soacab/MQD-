@@ -34,7 +34,7 @@ git push
 
 - 前端代码默认在本机直接运行。
 - 后端代码默认在本机直接运行。
-- PostgreSQL 使用 Docker Compose 在本机启动。
+- 后端默认使用 SQLite 便于快速启动和测试；需要按目标环境验证数据库服务时，PostgreSQL 使用 Docker Compose 在本机启动，并通过 `CHECKFLOW_DATABASE_URL` 切换。
 - 数据库结构通过 Alembic 迁移管理。
 - 初始测试数据通过 seed 脚本生成。
 
@@ -48,6 +48,23 @@ git push
 docker compose up -d
 ```
 
+使用 PostgreSQL 运行后端时，把数据库连接配置为：
+
+```bash
+export CHECKFLOW_DATABASE_URL=postgresql://checkflow:checkflow@127.0.0.1:5432/checkflow
+```
+
+不设置时默认使用 `.env.example` 中的 SQLite 连接，适合本地快速验证。
+
+### 安装依赖
+
+```bash
+uv sync
+cd frontend
+npm install
+cd ..
+```
+
 ### 启动后端
 
 ```bash
@@ -58,7 +75,6 @@ uv run uvicorn app.main:app --app-dir backend --reload
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import zlib
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -10,7 +11,7 @@ from fastapi import Body, Depends, FastAPI, Header
 
 from app.core.config import settings
 from app.core.cors import configure_cors
-from app.core.database import execute, from_json, query_all, query_one, to_json
+from app.core.database import execute, from_json, query_all, query_one, to_json, transaction
 from app.core.exceptions import BusinessError, business_error_handler
 from app.seed import seed_database
 
@@ -72,9 +73,10 @@ def current_user(authorization: str = Header(default="")) -> dict[str, Any]:
             settings.jwt_secret,
             algorithms=[settings.jwt_algorithm],
         )
-    except jwt.PyJWTError as exc:
+        user_id = int(payload["sub"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
         raise BusinessError("UNAUTHORIZED", "认证信息无效", 401) from exc
-    user = query_one("SELECT * FROM users WHERE id = ? AND status = 'active'", (int(payload["sub"]),))
+    user = query_one("SELECT * FROM users WHERE id = ? AND status = 'active'", (user_id,))
     if not user:
         raise BusinessError("UNAUTHORIZED", "用户不存在或已停用", 401)
     return user
@@ -120,7 +122,11 @@ def login(payload: dict = Body(...)) -> dict[str, Any]:
         raise BusinessError("INVALID_UID", "UID 不存在或已停用", 401)
     if payload.get("password") not in (user["uid"], "admin"):
         raise BusinessError("INVALID_PASSWORD", "密码无效", 401)
-    token = jwt.encode({"sub": str(user["id"])}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    token = jwt.encode(
+        {"sub": str(user["id"]), "exp": datetime.now(timezone.utc) + timedelta(seconds=7200)},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
     return ok({"access_token": token, "token_type": "Bearer", "expires_in": 7200, "user": serialize_user(user)})
 
 
@@ -206,6 +212,7 @@ def get_system_settings(_: dict = Depends(current_user)) -> dict[str, Any]:
 
 @app.put("/api/v1/system-settings/{key}")
 def save_system_setting(key: str, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_permissions(user, {"super_admin"})
     execute(
         """
         INSERT INTO system_settings(key, value_json, saved_by, updated_at)
@@ -270,38 +277,39 @@ def create_project(payload: dict = Body(...), user: dict = Depends(current_user)
             raise BusinessError("PROJECT_REQUIRED_FIELD", f"缺少必填字段 {field}")
     vdrive = parse_vdrive_url(payload.get("vdrive_url", ""))
     mq_user = query_one("SELECT name FROM users WHERE id = ?", (payload.get("mq_user_id"),))
-    cur = execute(
-        """
-        INSERT INTO projects(
-            project_name, customer, project_category, bu, project_level, mq_user_id,
-            mq_user_name_snapshot, mp_owner, group_name, planned_mp_date, production_line,
-            vdrive_url, vdrive_folder_guid, vdrive_folder_id, vdrive_folder_name, vdrive_folder_path,
-            created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            payload["project_name"],
-            payload["customer"],
-            payload.get("project_category"),
-            payload.get("bu"),
-            payload.get("project_level"),
-            payload.get("mq_user_id"),
-            mq_user["name"] if mq_user else None,
-            payload.get("mp_owner"),
-            payload.get("group_name"),
-            payload.get("planned_mp_date"),
-            payload.get("production_line"),
-            payload.get("vdrive_url"),
-            vdrive["folder_guid"],
-            vdrive["folder_id"],
-            vdrive["folder_name"],
-            vdrive["folder_path"],
-            user["id"],
-        ),
-    )
-    project_id = cur.lastrowid
-    add_project_order_rows(project_id, payload["receive_date"], payload.get("models", []), user["id"])
-    audit("create_project", "project", project_id, user["id"], payload)
+    with transaction():
+        cur = execute(
+            """
+            INSERT INTO projects(
+                project_name, customer, project_category, bu, project_level, mq_user_id,
+                mq_user_name_snapshot, mp_owner, group_name, planned_mp_date, production_line,
+                vdrive_url, vdrive_folder_guid, vdrive_folder_id, vdrive_folder_name, vdrive_folder_path,
+                created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload["project_name"],
+                payload["customer"],
+                payload.get("project_category"),
+                payload.get("bu"),
+                payload.get("project_level"),
+                payload.get("mq_user_id"),
+                mq_user["name"] if mq_user else None,
+                payload.get("mp_owner"),
+                payload.get("group_name"),
+                payload.get("planned_mp_date"),
+                payload.get("production_line"),
+                payload.get("vdrive_url"),
+                vdrive["folder_guid"],
+                vdrive["folder_id"],
+                vdrive["folder_name"],
+                vdrive["folder_path"],
+                user["id"],
+            ),
+        )
+        project_id = cur.lastrowid
+        add_project_order_rows(project_id, payload["receive_date"], payload.get("models", []), user["id"])
+        audit("create_project", "project", project_id, user["id"], payload)
     return ok(project_detail(query_one("SELECT * FROM projects WHERE id = ?", (project_id,))))
 
 
@@ -452,7 +460,7 @@ def create_business_rule(version_id: int, payload: dict = Body(...), user: dict 
 @app.patch("/api/v1/business-check-rules/{rule_id}")
 def update_business_rule(rule_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {"rules_admin"})
-    row_or_404("SELECT * FROM business_check_rules WHERE id = ?", (rule_id,), "BUSINESS_RULE_NOT_FOUND", "业务规则不存在")
+    ensure_rule_version_draft_for_rule(rule_id)
     for field in ("item_name", "item_type", "check_type", "checklist_requirement", "owner_dept", "sort_order"):
         if field in payload:
             execute(f"UPDATE business_check_rules SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (payload[field], rule_id))
@@ -467,7 +475,7 @@ def update_business_rule(rule_id: int, payload: dict = Body(...), user: dict = D
 @app.post("/api/v1/business-check-rules/{rule_id}/auto-check-execution-rules")
 def create_execution_rule(rule_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {"rules_admin"})
-    row_or_404("SELECT * FROM business_check_rules WHERE id = ?", (rule_id,), "BUSINESS_RULE_NOT_FOUND", "业务规则不存在")
+    ensure_rule_version_draft_for_rule(rule_id)
     cur = execute(
         """
         INSERT INTO auto_check_execution_rules(
@@ -493,7 +501,7 @@ def create_execution_rule(rule_id: int, payload: dict = Body(...), user: dict = 
 @app.patch("/api/v1/auto-check-execution-rules/{execution_rule_id}")
 def update_execution_rule(execution_rule_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {"rules_admin"})
-    row_or_404("SELECT * FROM auto_check_execution_rules WHERE id = ?", (execution_rule_id,), "EXECUTION_RULE_NOT_FOUND", "执行规则不存在")
+    ensure_rule_version_draft_for_execution_rule(execution_rule_id)
     for field in ("execution_code", "execution_mode", "adapter_type", "config_version"):
         if field in payload:
             execute(f"UPDATE auto_check_execution_rules SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (payload[field], execution_rule_id))
@@ -507,6 +515,7 @@ def update_execution_rule(execution_rule_id: int, payload: dict = Body(...), use
 @app.post("/api/v1/auto-check-execution-rules/{execution_rule_id}/enable")
 def enable_execution_rule(execution_rule_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {"rules_admin"})
+    ensure_rule_version_draft_for_execution_rule(execution_rule_id)
     execute("UPDATE auto_check_execution_rules SET is_enabled = 1 WHERE id = ?", (execution_rule_id,))
     return ok(query_one("SELECT * FROM auto_check_execution_rules WHERE id = ?", (execution_rule_id,)))
 
@@ -514,6 +523,7 @@ def enable_execution_rule(execution_rule_id: int, user: dict = Depends(current_u
 @app.post("/api/v1/auto-check-execution-rules/{execution_rule_id}/disable")
 def disable_execution_rule(execution_rule_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {"rules_admin"})
+    ensure_rule_version_draft_for_execution_rule(execution_rule_id)
     execute("UPDATE auto_check_execution_rules SET is_enabled = 0 WHERE id = ?", (execution_rule_id,))
     return ok(query_one("SELECT * FROM auto_check_execution_rules WHERE id = ?", (execution_rule_id,)))
 
@@ -533,16 +543,36 @@ def publish_rule_version(version_id: int, user: dict = Depends(current_user)) ->
             )
             if not execution:
                 raise BusinessError("AUTO_RULE_MISSING_EXECUTION", "自动检查项缺少启用的执行规则")
-    execute(
-        "UPDATE business_rule_versions SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE qg_node_id = ? AND status = 'published'",
-        (version["qg_node_id"],),
-    )
-    execute(
-        "UPDATE business_rule_versions SET status = 'published', published_by = ?, published_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (user["id"], version_id),
-    )
-    audit("publish_rule_version", "business_rule_version", version_id, user["id"])
+    with transaction():
+        execute(
+            "UPDATE business_rule_versions SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE qg_node_id = ? AND status = 'published'",
+            (version["qg_node_id"],),
+        )
+        execute(
+            "UPDATE business_rule_versions SET status = 'published', published_by = ?, published_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (user["id"], version_id),
+        )
+        audit("publish_rule_version", "business_rule_version", version_id, user["id"])
     return ok(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,)))
+
+
+def ensure_rule_version_draft_for_rule(rule_id: int) -> dict[str, Any]:
+    rule = row_or_404("SELECT * FROM business_check_rules WHERE id = ?", (rule_id,), "BUSINESS_RULE_NOT_FOUND", "业务规则不存在")
+    version = query_one("SELECT * FROM business_rule_versions WHERE id = ?", (rule["business_rule_version_id"],))
+    if version["status"] != "draft":
+        raise BusinessError("RULE_VERSION_NOT_DRAFT", "已发布或已废弃规则版本不可编辑")
+    return rule
+
+
+def ensure_rule_version_draft_for_execution_rule(execution_rule_id: int) -> dict[str, Any]:
+    execution = row_or_404(
+        "SELECT * FROM auto_check_execution_rules WHERE id = ?",
+        (execution_rule_id,),
+        "EXECUTION_RULE_NOT_FOUND",
+        "执行规则不存在",
+    )
+    ensure_rule_version_draft_for_rule(execution["business_check_rule_id"])
+    return execution
 
 
 @app.post("/api/v1/business-rule-versions/{version_id}/deprecate")
@@ -591,40 +621,41 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
         raise BusinessError("ACTIVE_TASK_EXISTS", "同项目同节点已有进行中或整改中任务")
 
     task_no = f"IT-{payload['project_id']}-{payload['qg_node_id']}-{version['id']}"
-    cur = execute(
-        """
-        INSERT INTO inspection_tasks(project_id, qg_node_id, task_no, status, current_round_no, created_by)
-        VALUES (?, ?, ?, 'running', 1, ?)
-        """,
-        (payload["project_id"], payload["qg_node_id"], task_no, user["id"]),
-    )
-    task_id = cur.lastrowid
-    business_snapshot, execution_snapshot = build_rule_snapshots(version["id"])
-    snapshot_cur = execute(
-        """
-        INSERT INTO rule_snapshots(
-            inspection_task_id, business_rule_version_id, business_rule_snapshot_json,
-            auto_check_execution_rule_snapshot_json
-        ) VALUES (?, ?, ?, ?)
-        """,
-        (task_id, version["id"], to_json(business_snapshot), to_json(execution_snapshot)),
-    )
-    round_cur = execute(
-        "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, 1, 'running')",
-        (task_id,),
-    )
-    round_id = round_cur.lastrowid
-    generate_items_for_round(task_id, round_id, business_snapshot, execution_snapshot)
-    report_cur = execute(
-        """
-        INSERT INTO inspection_reports(
-            inspection_task_id, project_id, qg_node_id, report_no,
-            latest_round_no, business_rule_version_no, generated_by
-        ) VALUES (?, ?, ?, ?, 1, ?, ?)
-        """,
-        (task_id, project["id"], payload["qg_node_id"], f"REP-{task_id}", version["version_no"], user["id"]),
-    )
-    audit("create_inspection_task", "inspection_task", task_id, user["id"], payload)
+    with transaction():
+        cur = execute(
+            """
+            INSERT INTO inspection_tasks(project_id, qg_node_id, task_no, status, current_round_no, created_by)
+            VALUES (?, ?, ?, 'running', 1, ?)
+            """,
+            (payload["project_id"], payload["qg_node_id"], task_no, user["id"]),
+        )
+        task_id = cur.lastrowid
+        business_snapshot, execution_snapshot = build_rule_snapshots(version["id"])
+        snapshot_cur = execute(
+            """
+            INSERT INTO rule_snapshots(
+                inspection_task_id, business_rule_version_id, business_rule_snapshot_json,
+                auto_check_execution_rule_snapshot_json
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (task_id, version["id"], to_json(business_snapshot), to_json(execution_snapshot)),
+        )
+        round_cur = execute(
+            "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, 1, 'running')",
+            (task_id,),
+        )
+        round_id = round_cur.lastrowid
+        generate_items_for_round(task_id, round_id, business_snapshot, execution_snapshot)
+        report_cur = execute(
+            """
+            INSERT INTO inspection_reports(
+                inspection_task_id, project_id, qg_node_id, report_no,
+                latest_round_no, business_rule_version_no, generated_by
+            ) VALUES (?, ?, ?, ?, 1, ?, ?)
+            """,
+            (task_id, project["id"], payload["qg_node_id"], f"REP-{task_id}", version["version_no"], user["id"]),
+        )
+        audit("create_inspection_task", "inspection_task", task_id, user["id"], payload)
     return ok(
         {
             "inspection_task_id": task_id,
@@ -640,20 +671,20 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
 
 
 def generate_items_for_round(task_id: int, round_id: int, business_snapshot: list[dict[str, Any]], execution_snapshot: list[dict[str, Any]], only_rule_codes: set[str] | None = None) -> None:
-    execution_rule_ids = {row["business_check_rule_id"] for row in execution_snapshot}
+    execution_rules_by_business_rule_id = {row["business_check_rule_id"]: row for row in execution_snapshot}
     for rule in business_snapshot:
         if only_rule_codes is not None and rule["rule_code"] not in only_rule_codes:
             continue
         if rule["item_type"] == "inherit":
             status = "inherited"
             final_result = "inherit"
-        elif rule["item_type"] in ("auto", "system") and rule["id"] in execution_rule_ids:
+        elif rule["item_type"] in ("auto", "system") and rule["id"] in execution_rules_by_business_rule_id:
             status = "pending"
             final_result = None
         else:
             status = "manual_required"
             final_result = None
-        execute(
+        cur = execute(
             """
             INSERT INTO inspection_items(
                 inspection_task_id, inspection_round_id, source_rule_code, source_business_rule_id,
@@ -677,6 +708,28 @@ def generate_items_for_round(task_id: int, round_id: int, business_snapshot: lis
                 final_result,
             ),
         )
+        if status == "pending":
+            run_mock_auto_check(cur.lastrowid, execution_rules_by_business_rule_id[rule["id"]])
+
+
+def run_mock_auto_check(item_id: int, execution_rule_snapshot: dict[str, Any]) -> None:
+    execute(
+        """
+        INSERT INTO auto_check_results(
+            inspection_item_id, attempt_no, is_latest, auto_status, auto_result,
+            confidence, evidence_text, source_system, execution_rule_snapshot,
+            raw_result_json, started_at, finished_at
+        ) VALUES (?, 1, 1, 'success', 'pass', 0.9, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (
+            item_id,
+            "Mock adapter found matching evidence; engineer confirmation is still required.",
+            execution_rule_snapshot.get("adapter_type", "mock"),
+            to_json(execution_rule_snapshot),
+            to_json({"mock": True}),
+        ),
+    )
+    execute("UPDATE inspection_items SET status = 'auto_completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (item_id,))
 
 
 @app.get("/api/v1/inspection-tasks")
@@ -817,18 +870,19 @@ def archive_current_round(task_id: int, user: dict = Depends(current_user)) -> d
     else:
         overall_result = "FULL_GO"
         task_status = "completed"
-    execute("UPDATE inspection_rounds SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ?", (round_row["id"],))
-    execute(
-        """
-        UPDATE inspection_tasks SET status = ?, archived_at = CURRENT_TIMESTAMP,
-        completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
-        last_operated_at = CURRENT_TIMESTAMP WHERE id = ?
-        """,
-        (task_status, task_status, task_id),
-    )
-    rectification_count, followup_count = generate_work_items(task, round_row, items, user["id"])
-    report = update_report(task_id, round_row, items, overall_result)
-    audit("archive_current_round", "inspection_task", task_id, user["id"], {"overall_result": overall_result})
+    with transaction():
+        execute("UPDATE inspection_rounds SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ?", (round_row["id"],))
+        execute(
+            """
+            UPDATE inspection_tasks SET status = ?, archived_at = CURRENT_TIMESTAMP,
+            completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
+            last_operated_at = CURRENT_TIMESTAMP WHERE id = ?
+            """,
+            (task_status, task_status, task_id),
+        )
+        rectification_count, followup_count = generate_work_items(task, round_row, items, user["id"])
+        report = update_report(task_id, round_row, items, overall_result)
+        audit("archive_current_round", "inspection_task", task_id, user["id"], {"overall_result": overall_result})
     return ok(
         {
             "inspection_task_id": task_id,
@@ -982,11 +1036,12 @@ def list_rectifications(task_id: int | None = None, project_id: int | None = Non
 def mark_rectification_done(rectification_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {"inspection_engineer"})
     row_or_404("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,), "RECTIFICATION_NOT_FOUND", "整改项不存在")
-    execute(
-        "UPDATE rectification_items SET marked_done_by = ?, marked_done_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (user["id"], rectification_id),
-    )
-    audit("mark_rectification_done", "rectification_item", rectification_id, user["id"])
+    with transaction():
+        execute(
+            "UPDATE rectification_items SET marked_done_by = ?, marked_done_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (user["id"], rectification_id),
+        )
+        audit("mark_rectification_done", "rectification_item", rectification_id, user["id"])
     return ok(query_one("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,)))
 
 
@@ -1041,17 +1096,18 @@ def trigger_recheck(task_id: int, user: dict = Depends(current_user)) -> dict[st
         "SELECT * FROM inspection_items WHERE inspection_round_id = ? AND final_result = 'fail' ORDER BY sort_order",
         (current_round["id"],),
     )
-    new_round_no = task["current_round_no"] + 1
-    round_cur = execute(
-        "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, ?, 'running')",
-        (task_id, new_round_no),
-    )
-    snapshot = query_one("SELECT * FROM rule_snapshots WHERE inspection_task_id = ?", (task_id,))
-    business_snapshot = from_json(snapshot["business_rule_snapshot_json"], [])
-    execution_snapshot = from_json(snapshot["auto_check_execution_rule_snapshot_json"], [])
-    generate_items_for_round(task_id, round_cur.lastrowid, business_snapshot, execution_snapshot, {item["source_rule_code"] for item in fail_items})
-    execute("UPDATE inspection_tasks SET status = 'running', current_round_no = ?, last_operated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_round_no, task_id))
-    audit("trigger_recheck", "inspection_task", task_id, user["id"], {"new_round_no": new_round_no})
+    with transaction():
+        new_round_no = task["current_round_no"] + 1
+        round_cur = execute(
+            "INSERT INTO inspection_rounds(inspection_task_id, round_no, status) VALUES (?, ?, 'running')",
+            (task_id, new_round_no),
+        )
+        snapshot = query_one("SELECT * FROM rule_snapshots WHERE inspection_task_id = ?", (task_id,))
+        business_snapshot = from_json(snapshot["business_rule_snapshot_json"], [])
+        execution_snapshot = from_json(snapshot["auto_check_execution_rule_snapshot_json"], [])
+        generate_items_for_round(task_id, round_cur.lastrowid, business_snapshot, execution_snapshot, {item["source_rule_code"] for item in fail_items})
+        execute("UPDATE inspection_tasks SET status = 'running', current_round_no = ?, last_operated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_round_no, task_id))
+        audit("trigger_recheck", "inspection_task", task_id, user["id"], {"new_round_no": new_round_no})
     return ok(
         {
             "inspection_task_id": task_id,
@@ -1064,10 +1120,28 @@ def trigger_recheck(task_id: int, user: dict = Depends(current_user)) -> dict[st
 
 
 @app.get("/api/v1/reports")
-def list_reports(project_id: int | None = None, _: dict = Depends(current_user)) -> dict[str, Any]:
+def list_reports(
+    project_id: int | None = None,
+    qg_node_id: int | None = None,
+    overall_result: str | None = None,
+    generated_by: int | None = None,
+    generated_from: str | None = None,
+    generated_to: str | None = None,
+    _: dict = Depends(current_user),
+) -> dict[str, Any]:
     rows = query_all("SELECT * FROM inspection_reports ORDER BY id DESC")
     if project_id:
         rows = [row for row in rows if row["project_id"] == project_id]
+    if qg_node_id:
+        rows = [row for row in rows if row["qg_node_id"] == qg_node_id]
+    if overall_result:
+        rows = [row for row in rows if row["overall_result"] == overall_result]
+    if generated_by:
+        rows = [row for row in rows if row["generated_by"] == generated_by]
+    if generated_from:
+        rows = [row for row in rows if row["generated_at"] >= generated_from]
+    if generated_to:
+        rows = [row for row in rows if row["generated_at"] <= generated_to]
     return ok({"items": rows})
 
 
@@ -1075,6 +1149,15 @@ def list_reports(project_id: int | None = None, _: dict = Depends(current_user))
 def get_report(report_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
     report = row_or_404("SELECT * FROM inspection_reports WHERE id = ?", (report_id,), "REPORT_NOT_FOUND", "报告不存在")
     report["summary_json"] = from_json(report["summary_json"], {})
+    report["project"] = query_one("SELECT * FROM projects WHERE id = ?", (report["project_id"],))
+    report["qg_node"] = query_one("SELECT * FROM qg_nodes WHERE id = ?", (report["qg_node_id"],))
+    report["rule_snapshot"] = query_one(
+        "SELECT * FROM rule_snapshots WHERE inspection_task_id = ?",
+        (report["inspection_task_id"],),
+    )
+    if report["rule_snapshot"]:
+        report["rule_snapshot"]["business_rule_snapshot_json"] = from_json(report["rule_snapshot"]["business_rule_snapshot_json"], [])
+        report["rule_snapshot"]["auto_check_execution_rule_snapshot_json"] = from_json(report["rule_snapshot"]["auto_check_execution_rule_snapshot_json"], [])
     items = query_all("SELECT * FROM report_items WHERE report_id = ? ORDER BY sort_order", (report_id,))
     for item in items:
         item["engineer_decision_snapshot"] = from_json(item["engineer_decision_snapshot"], {})
@@ -1084,5 +1167,16 @@ def get_report(report_id: int, _: dict = Depends(current_user)) -> dict[str, Any
 
 
 @app.get("/api/v1/audit-logs")
-def list_audit_logs(_: dict = Depends(current_user)) -> dict[str, Any]:
+def list_audit_logs(user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_permissions(user, {"super_admin"})
     return ok({"items": query_all("SELECT * FROM audit_logs ORDER BY id DESC")})
+
+
+@app.get("/api/v1/inspection-items/{item_id}/auto-check-results")
+def list_auto_check_results(item_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
+    row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
+    rows = query_all("SELECT * FROM auto_check_results WHERE inspection_item_id = ? ORDER BY attempt_no", (item_id,))
+    for row in rows:
+        row["execution_rule_snapshot"] = from_json(row["execution_rule_snapshot"], {})
+        row["raw_result_json"] = from_json(row["raw_result_json"], {})
+    return ok({"items": rows})

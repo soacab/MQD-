@@ -1,14 +1,17 @@
 from logging.config import fileConfig
 
+from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-from app.core.database import SCHEMA_SQL
+from app.core.config import settings
 
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 
 def run_migrations_offline() -> None:
@@ -18,12 +21,15 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = context.config.attributes.get("connection")
-    if connectable is None:
-        raise RuntimeError("Run migrations with an injected SQLAlchemy connection for this MVP.")
-    with connectable.begin() as connection:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
         context.configure(connection=connection)
-        context.execute(SCHEMA_SQL)
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 if context.is_offline_mode():

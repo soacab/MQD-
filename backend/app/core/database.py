@@ -1,12 +1,16 @@
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from app.core.config import settings
 
 
-_connection: sqlite3.Connection | None = None
+_connection: Any | None = None
+_backend = "sqlite"
+_transaction_depth = 0
 
 
 def _database_path() -> str:
@@ -16,52 +20,134 @@ def _database_path() -> str:
     return settings.database_url.removeprefix(prefix)
 
 
-def connect() -> sqlite3.Connection:
-    global _connection
+class CursorResult:
+    def __init__(self, cursor: Any, lastrowid: int | None = None):
+        self._cursor = cursor
+        self.lastrowid = lastrowid if lastrowid is not None else getattr(cursor, "lastrowid", None)
+
+
+def is_postgres_url(database_url: str) -> bool:
+    return database_url.startswith(("postgresql://", "postgres://"))
+
+
+def connect() -> Any:
+    global _connection, _backend
     if _connection is None:
-        path = _database_path()
-        if path != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-        _connection = sqlite3.connect(path, check_same_thread=False)
-        _connection.row_factory = sqlite3.Row
-        _connection.execute("PRAGMA foreign_keys = ON")
+        if is_postgres_url(settings.database_url):
+            import psycopg
+            from psycopg.rows import dict_row
+
+            _backend = "postgresql"
+            _connection = psycopg.connect(settings.database_url, row_factory=dict_row)
+        else:
+            _backend = "sqlite"
+            path = _database_path()
+            if path != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            _connection = sqlite3.connect(path, check_same_thread=False)
+            _connection.row_factory = sqlite3.Row
+            _connection.execute("PRAGMA foreign_keys = ON")
     return _connection
 
 
 def reset_database() -> None:
-    global _connection
+    global _connection, _transaction_depth
     if _connection is not None:
         _connection.close()
     _connection = None
+    _transaction_depth = 0
     create_schema()
 
 
 def close_database() -> None:
-    global _connection
+    global _connection, _transaction_depth
     if _connection is not None:
         _connection.close()
         _connection = None
+    _transaction_depth = 0
 
 
 def create_schema() -> None:
     conn = connect()
-    conn.executescript(SCHEMA_SQL)
+    if _backend == "postgresql":
+        with conn.cursor() as cur:
+            for statement in schema_sql_for_backend(_backend).split(";"):
+                statement = statement.strip()
+                if statement:
+                    cur.execute(statement)
+    else:
+        conn.executescript(SCHEMA_SQL)
     conn.commit()
 
 
-def execute(sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
-    cur = connect().execute(sql, params)
-    connect().commit()
-    return cur
+def execute(sql: str, params: tuple[Any, ...] = ()) -> CursorResult:
+    conn = connect()
+    if _backend == "postgresql":
+        cur = conn.cursor()
+        cur.execute(_prepare_sql(sql), params)
+        lastrowid = None
+        if sql.lstrip().upper().startswith("INSERT"):
+            with conn.cursor() as id_cur:
+                id_cur.execute("SELECT lastval() AS id")
+                lastrowid = id_cur.fetchone()["id"]
+        result = CursorResult(cur, lastrowid)
+    else:
+        result = CursorResult(conn.execute(sql, params))
+    if _transaction_depth == 0:
+        conn.commit()
+    return result
+
+
+@contextmanager
+def transaction():
+    global _transaction_depth
+    conn = connect()
+    outermost = _transaction_depth == 0
+    if outermost:
+        conn.execute("BEGIN")
+    _transaction_depth += 1
+    try:
+        yield
+        _transaction_depth -= 1
+        if outermost:
+            conn.commit()
+    except Exception:
+        _transaction_depth -= 1
+        if outermost:
+            conn.rollback()
+        raise
 
 
 def query_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-    row = connect().execute(sql, params).fetchone()
+    conn = connect()
+    if _backend == "postgresql":
+        with conn.cursor() as cur:
+            cur.execute(_prepare_sql(sql), params)
+            row = cur.fetchone()
+    else:
+        row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
 
 
 def query_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    return [dict(row) for row in connect().execute(sql, params).fetchall()]
+    conn = connect()
+    if _backend == "postgresql":
+        with conn.cursor() as cur:
+            cur.execute(_prepare_sql(sql), params)
+            return [dict(row) for row in cur.fetchall()]
+    return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def _prepare_sql(sql: str) -> str:
+    return sql.replace("?", "%s") if _backend == "postgresql" else sql
+
+
+def schema_sql_for_backend(backend: str) -> str:
+    if backend != "postgresql":
+        return SCHEMA_SQL
+    sql = SCHEMA_SQL.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    sql = sql.replace("ON CONFLICT(key) DO UPDATE SET", "ON CONFLICT(key) DO UPDATE SET")
+    return sql
 
 
 def to_json(value: Any) -> str:

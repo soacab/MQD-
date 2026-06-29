@@ -137,8 +137,100 @@ nav a:hover {
   font-size: 14px;
 }
 
+.module-link {
+  display: inline-block;
+  margin-top: 12px;
+  color: #245fb6;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.page {
+  min-height: 100vh;
+  padding: 28px;
+  background: #f6f7f9;
+}
+
+.page-header {
+  margin-bottom: 22px;
+}
+
+.page-header h1 {
+  margin: 4px 0 0;
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  background: #fff;
+  border: 1px solid #e0e4ea;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.form-panel h2,
+.module h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.form-panel label {
+  display: grid;
+  gap: 6px;
+  color: #4d5663;
+  font-size: 14px;
+}
+
+.form-panel label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-panel input,
+.form-panel select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  color: #20242a;
+  background: #fff;
+}
+
+.form-panel button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #245fb6;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.form-panel button:hover {
+  background: #1d4d92;
+}
+
+.filters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  margin-bottom: 16px;
 }
 
 @media (max-width: 900px) {
@@ -156,7 +248,9 @@ nav a:hover {
   }
 
   .summary,
-  .grid {
+  .grid,
+  .two-column,
+  .filters {
     grid-template-columns: 1fr;
   }
 }

@@ -1,12 +1,12 @@
 import { fetchHealth } from "@/lib/api";
 
 const modules = [
-  ["项目", "项目创建、VDrive 链接、加单、软删除"],
-  ["规则", "QG 节点、规则版本、检查项、执行规则发布"],
-  ["点检", "任务创建、规则快照、首轮检查项、工程师确认"],
-  ["归档", "FULL_GO / C_GO / NO_GO 结论、报告和过程记录"],
-  ["整改", "整改项、待跟进项、复查轮次"],
-  ["后台", "账号权限、系统设置、审计日志"]
+  ["项目", "项目创建、VDrive 链接、加单、软删除", "/projects"],
+  ["规则", "QG 节点、规则版本、检查项、执行规则发布", "/rules"],
+  ["点检", "任务创建、规则快照、首轮检查项、工程师确认", "/inspection"],
+  ["报告", "FULL_GO / C_GO / NO_GO 结论、报告和过程记录", "/reports"],
+  ["整改", "整改项、待跟进项、复查轮次", "/rectification"],
+  ["后台", "账号权限、系统设置、审计日志", "/admin"]
 ];
 
 export default async function Page() {
@@ -20,8 +20,9 @@ export default async function Page() {
           <h1>CheckFlow</h1>
         </div>
         <nav aria-label="主导航">
-          {modules.map(([title]) => (
-            <a key={title} href={`#${title}`}>
+          <a href="/login">登录</a>
+          {modules.map(([title, , href]) => (
+            <a key={title} href={href}>
               {title}
             </a>
           ))}
@@ -63,10 +64,13 @@ export default async function Page() {
         </section>
 
         <section className="grid" aria-label="模块入口">
-          {modules.map(([title, description]) => (
+          {modules.map(([title, description, href]) => (
             <article id={title} key={title} className="module">
               <h3>{title}</h3>
               <p>{description}</p>
+              <a className="module-link" href={href}>
+                进入
+              </a>
             </article>
           ))}
         </section>
