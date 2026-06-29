@@ -11,13 +11,14 @@ from fastapi import Body, Depends, FastAPI, Header
 
 from app.core.config import settings
 from app.core.cors import configure_cors
-from app.core.database import execute, from_json, query_all, query_one, to_json, transaction
+from app.core.database import create_schema, execute, from_json, query_all, query_one, to_json, transaction
 from app.core.exceptions import BusinessError, business_error_handler
 from app.seed import seed_database
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    create_schema()
     seed_database()
     yield
 

@@ -46,6 +46,16 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(me.status_code, 200, me.text)
         self.assertIn("super_admin", me.json()["data"]["permissions"])
 
+    def test_app_startup_creates_schema_before_seed(self):
+        from app.core.database import close_database
+        from app.main import app
+
+        close_database()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            health = client.get("/health")
+
+        self.assertEqual(health.status_code, 200, health.text)
+
     def test_project_rule_task_archive_report_rectification_recheck_flow(self):
         project_id, version_id, auto_rule_id = self._create_project_and_rules()
         execution_rule = self.client.post(
