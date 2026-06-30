@@ -687,7 +687,7 @@ class P0MainFlowTest(unittest.TestCase):
         )
         self.assertEqual(published.status_code, 200, published.text)
 
-        with patch("app.main.generate_items_for_round", side_effect=RuntimeError("forced failure")):
+        with patch("app.services.inspection_service.generate_items_for_round", side_effect=RuntimeError("forced failure")):
             failed = self.client.post(
                 "/api/v1/inspection-tasks",
                 headers=self.headers,
