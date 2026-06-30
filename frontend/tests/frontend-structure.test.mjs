@@ -38,6 +38,7 @@ describe("frontend structure", () => {
       "/api/v1/projects",
       "/api/v1/qg-nodes",
       "/api/v1/business-rule-versions",
+      "/api/v1/inspection-tasks/prepare",
       "/api/v1/inspection-tasks",
       "/api/v1/rectification-items",
       "/api/v1/followup-items",
@@ -98,7 +99,7 @@ describe("frontend structure", () => {
       ],
       "app/projects/page.tsx": ["use client", "listProjects(", "createProject(", "validateVdriveLink("],
       "app/rules/page.tsx": ["use client", "listQGNodes(", "createRuleVersion(", "publishRuleVersion("],
-      "app/inspection/page.tsx": ["use client", "createInspectionTask(", "confirmInspectionItem(", "archiveCurrentRound("],
+      "app/inspection/page.tsx": ["use client", "prepareInspectionTask(", "createInspectionTask(", "confirmInspectionItem(", "archiveCurrentRound("],
       "app/reports/page.tsx": ["use client", "listReports(", "getReport("],
       "app/rectification/page.tsx": ["use client", "listRectifications(", "triggerRecheck("]
     };
@@ -162,9 +163,17 @@ describe("frontend structure", () => {
       assert.match(api, new RegExp(snippet.replaceAll("(", "\\(")), `api should contain ${snippet}`);
     }
 
-    for (const snippet of ["getProject(", "validateVdriveLink(", "vdrivePreview", "校验 VDrive 路径"]) {
+    for (const snippet of [
+      "prepareInspectionTask(",
+      "suggested_project_name",
+      "校验路径",
+      "下一步：确认信息",
+      "开始点检"
+    ]) {
       assert.match(inspectionPage, new RegExp(snippet.replaceAll("(", "\\(")), `inspection page should contain ${snippet}`);
     }
+    assert.doesNotMatch(inspectionPage, /项目 ID/, "inspection task creation should not ask users for project ID");
+    assert.doesNotMatch(inspectionPage, /vdrivePreview/, "inspection page should use the VDrive-first prepare result");
 
     for (const snippet of ["archiveSummary", "window.confirm", "归档前确认", "归档后可进入报告页查看结论"]) {
       assert.match(inspectionPage, new RegExp(snippet.replaceAll("(", "\\(")), `inspection page should contain ${snippet}`);

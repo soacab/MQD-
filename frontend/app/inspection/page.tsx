@@ -6,15 +6,18 @@ import {
   confirmInspectionItem,
   convertInspectionItemToManual,
   createInspectionTask,
-  getProject,
   getInspectionItem,
   getInspectionTask,
   listCurrentRoundItems,
   listInspectionTasks,
-  validateVdriveLink,
+  listQGNodes,
+  listUsers,
+  prepareInspectionTask,
   type InspectionItem,
+  type InspectionTaskPrepare,
   type InspectionTask,
-  type VDriveValidation
+  type QGNode,
+  type User
 } from "@/lib/api";
 
 const resultLabels: Record<string, string> = {
@@ -24,14 +27,40 @@ const resultLabels: Record<string, string> = {
   na: "不适用"
 };
 
+const emptyTaskForm = {
+  vdrive_url: "",
+  project_name: "",
+  customer: "",
+  project_category: "",
+  bu: "",
+  project_level: "",
+  mq_user_id: "",
+  mp_owner: "",
+  group_name: "",
+  planned_mp_date: "",
+  production_line: "",
+  receive_date: "",
+  qg_node_id: ""
+};
+
+const projectCategories = ["新项目", "派生项目", "年度改款", "量产变更"];
+const buOptions = ["智能座舱", "智能驾驶", "车身电子", "制造质量"];
+const projectLevels = ["A", "B", "C"];
+const groupOptions = ["MQD", "PT", "TE", "MP"];
+const productionLines = ["FA", "SMT", "组装线 1", "组装线 2"];
+
 export default function InspectionPage() {
   const [tasks, setTasks] = useState<InspectionTask[]>([]);
+  const [qgNodes, setQgNodes] = useState<QGNode[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [selectedTask, setSelectedTask] = useState<InspectionTask | null>(null);
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InspectionItem | null>(null);
-  const [vdrivePreview, setVdrivePreview] = useState<(VDriveValidation & { project_id: string }) | null>(null);
+  const [prepareResult, setPrepareResult] = useState<InspectionTaskPrepare | null>(null);
+  const [wizardStep, setWizardStep] = useState<"edit" | "confirm">("edit");
   const [message, setMessage] = useState("");
-  const [taskForm, setTaskForm] = useState({ project_id: "", qg_node_id: "" });
+  const [taskForm, setTaskForm] = useState(emptyTaskForm);
+  const [models, setModels] = useState([""]);
   const [decisionForm, setDecisionForm] = useState({
     decision_result: "pass",
     decision_text: "工程师人工核查确认满足",
@@ -52,7 +81,18 @@ export default function InspectionPage() {
 
   useEffect(() => {
     void refreshTasks();
+    void loadTaskOptions();
   }, []);
+
+  async function loadTaskOptions() {
+    try {
+      const [nodeRows, userRows] = await Promise.all([listQGNodes(), listUsers({ status: "active" })]);
+      setQgNodes(nodeRows.items);
+      setUsers(userRows.items);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "任务创建选项加载失败");
+    }
+  }
 
   async function loadTask(taskId: number) {
     try {
@@ -67,18 +107,102 @@ export default function InspectionPage() {
     }
   }
 
-  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
+  async function handlePrepareTask() {
+    if (!taskForm.vdrive_url.trim()) {
+      setMessage("请先粘贴 VDrive 链接。");
+      return;
+    }
+    try {
+      const result = await prepareInspectionTask(taskForm.vdrive_url);
+      const history = result.project;
+      const latestOrder = history?.orders?.at(-1);
+      setPrepareResult(result);
+      setTaskForm((current) => ({
+        ...current,
+        vdrive_url: current.vdrive_url,
+        project_name: history?.project_name || result.suggested_project_name || current.project_name,
+        customer: history?.customer || "",
+        project_category: history?.project_category || "",
+        bu: history?.bu || "",
+        project_level: history?.project_level || "",
+        mq_user_id: history?.mq_user_id ? String(history.mq_user_id) : "",
+        mp_owner: history?.mp_owner || "",
+        group_name: history?.group_name || "",
+        planned_mp_date: history?.planned_mp_date || "",
+        production_line: history?.production_line || "",
+        receive_date: latestOrder?.receive_date || "",
+        qg_node_id: result.recommended_qg_node?.id ? String(result.recommended_qg_node.id) : current.qg_node_id
+      }));
+      setModels(history?.models?.length ? history.models.map((model) => model.model_name) : [""]);
+      setWizardStep("edit");
+      setMessage(
+        result.has_history
+          ? "VDrive 链接校验通过，已回填历史项目信息。"
+          : "VDrive 链接校验通过，已用文件夹名填入项目名称。"
+      );
+    } catch (error) {
+      setPrepareResult(null);
+      setMessage(error instanceof Error ? error.message : "VDrive 链接校验失败");
+    }
+  }
+
+  function validateTaskForm() {
+    const cleanModels = models.map((item) => item.trim()).filter(Boolean);
+    if (!prepareResult) {
+      return "请先校验 VDrive 链接。";
+    }
+    if (!taskForm.project_name || !taskForm.customer || !taskForm.receive_date || !taskForm.qg_node_id) {
+      return "请补齐项目名称、客户、项目接收时间和 QG 节点。";
+    }
+    if (!taskForm.project_category || !taskForm.bu || !taskForm.project_level || !taskForm.mq_user_id || !taskForm.mp_owner || !taskForm.group_name || !taskForm.production_line) {
+      return "请补齐项目基础信息。";
+    }
+    if (!cleanModels.length) {
+      return "至少填写 1 个机型。";
+    }
+    return "";
+  }
+
+  function handleGoConfirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!vdrivePreview || vdrivePreview.project_id !== taskForm.project_id) {
-      setMessage("请先校验 VDrive 路径。");
+    const error = validateTaskForm();
+    if (error) {
+      setMessage(error);
+      return;
+    }
+    setWizardStep("confirm");
+    setMessage("");
+  }
+
+  async function handleCreateTask() {
+    const error = validateTaskForm();
+    if (error) {
+      setMessage(error);
+      setWizardStep("edit");
       return;
     }
     try {
       const task = await createInspectionTask({
-        project_id: Number(taskForm.project_id),
+        vdrive_url: taskForm.vdrive_url,
+        project_name: taskForm.project_name,
+        customer: taskForm.customer,
+        project_category: taskForm.project_category,
+        bu: taskForm.bu,
+        project_level: taskForm.project_level,
+        mq_user_id: Number(taskForm.mq_user_id),
+        mp_owner: taskForm.mp_owner,
+        group_name: taskForm.group_name,
+        planned_mp_date: taskForm.planned_mp_date,
+        production_line: taskForm.production_line,
+        receive_date: taskForm.receive_date,
+        models: models.map((item) => item.trim()).filter(Boolean),
         qg_node_id: Number(taskForm.qg_node_id)
       });
       const taskId = task.inspection_task_id || task.id;
+      setTaskForm(emptyTaskForm);
+      setModels([""]);
+      setPrepareResult(null);
+      setWizardStep("edit");
       setMessage("点检任务已创建。");
       await refreshTasks();
       if (taskId) {
@@ -89,26 +213,16 @@ export default function InspectionPage() {
     }
   }
 
-  async function handleValidateProjectVdrive() {
-    if (!taskForm.project_id) {
-      setMessage("请先填写项目 ID。");
-      return;
-    }
-    try {
-      const project = await getProject(Number(taskForm.project_id));
-      const vdriveUrl = project.vdrive?.url || project.vdrive_url;
-      if (!vdriveUrl) {
-        setVdrivePreview(null);
-        setMessage("项目未保存 VDrive 链接，不能创建点检任务。");
-        return;
-      }
-      const result = await validateVdriveLink(vdriveUrl);
-      setVdrivePreview({ ...result, project_id: taskForm.project_id });
-      setMessage(`VDrive 路径已校验：${result.folder_path}`);
-    } catch (error) {
-      setVdrivePreview(null);
-      setMessage(error instanceof Error ? error.message : "VDrive 路径校验失败");
-    }
+  function updateModel(index: number, value: string) {
+    setModels((current) => current.map((item, itemIndex) => (itemIndex === index ? value : item)));
+  }
+
+  function addModel() {
+    setModels((current) => [...current, ""]);
+  }
+
+  function removeModel(index: number) {
+    setModels((current) => (current.length === 1 ? [""] : current.filter((_, itemIndex) => itemIndex !== index)));
   }
 
   async function handleSelectItem(itemId: number) {
@@ -183,6 +297,9 @@ export default function InspectionPage() {
 
   const confirmedCount = items.filter((item) => item.status === "confirmed" || item.status === "inherited").length;
   const canArchive = items.length > 0 && confirmedCount === items.length && selectedTask?.status === "running";
+  const selectedQGNode = qgNodes.find((node) => String(node.id) === taskForm.qg_node_id);
+  const selectedMqUser = users.find((user) => String(user.id) === taskForm.mq_user_id);
+  const cleanModels = models.map((item) => item.trim()).filter(Boolean);
 
   return (
     <main className="page">
@@ -195,7 +312,7 @@ export default function InspectionPage() {
         <div>
           <span>1</span>
           <strong>创建任务</strong>
-          <p>选择 normal 项目和已发布 QG 规则。</p>
+          <p>粘贴 VDrive 链接，确认项目信息和 QG 节点。</p>
         </div>
         <div>
           <span>2</span>
@@ -214,39 +331,180 @@ export default function InspectionPage() {
         </div>
       </section>
       <section className="two-column">
-        <form className="form-panel" onSubmit={handleCreateTask}>
-          <h2>新建点检任务</h2>
-          <label>
-            项目 ID
-            <input
-              name="project_id"
-              value={taskForm.project_id}
-              onChange={(event) => {
-                setTaskForm({ ...taskForm, project_id: event.target.value });
-                setVdrivePreview(null);
-              }}
-              required
-            />
-          </label>
-          <label>
-            QG 节点 ID
-            <input
-              name="qg_node_id"
-              value={taskForm.qg_node_id}
-              onChange={(event) => setTaskForm({ ...taskForm, qg_node_id: event.target.value })}
-              required
-            />
-          </label>
-          <div className="button-row">
-            <button className="secondary-button" type="button" onClick={handleValidateProjectVdrive}>
-              校验 VDrive 路径
-            </button>
-            <button type="submit" disabled={!vdrivePreview || vdrivePreview.project_id !== taskForm.project_id}>
-              创建任务
-            </button>
+        <section className="form-panel wizard-panel">
+          <div className="section-heading">
+            <div>
+              <h2>新建检查任务</h2>
+              <p>第 {wizardStep === "edit" ? "1" : "2"} 步 / 共 2 步</p>
+            </div>
           </div>
-          {vdrivePreview ? <p className="notice">已识别：{vdrivePreview.folder_path}</p> : null}
-        </form>
+          {wizardStep === "edit" ? (
+            <form className="stack" onSubmit={handleGoConfirm}>
+              <div className="vdrive-row">
+                <label>
+                  VDrive 项目根链接 <span className="required">*</span>
+                  <input
+                    name="vdrive_url"
+                    value={taskForm.vdrive_url}
+                    onChange={(event) => {
+                      setTaskForm({ ...taskForm, vdrive_url: event.target.value });
+                      setPrepareResult(null);
+                    }}
+                    placeholder="粘贴 VDrive 链接"
+                    required
+                  />
+                </label>
+                <button className="secondary-button" type="button" onClick={handlePrepareTask}>
+                  校验路径
+                </button>
+              </div>
+              {prepareResult ? (
+                <p className="notice">
+                  已识别：{prepareResult.vdrive.folder_path}；{prepareResult.has_history ? "已找到历史记录" : "未找到历史记录"}
+                </p>
+              ) : null}
+              <div className="form-divider">项目基础信息</div>
+              <label className="wide-field">
+                项目名称 <span className="required">*</span>
+                <input name="project_name" value={taskForm.project_name} onChange={(event) => setTaskForm({ ...taskForm, project_name: event.target.value })} required />
+              </label>
+              <div className="form-grid">
+                <label>
+                  客户 <span className="required">*</span>
+                  <select value={taskForm.customer} onChange={(event) => setTaskForm({ ...taskForm, customer: event.target.value })} required>
+                    <option value="">请选择</option>
+                    <option value="Customer A">Customer A</option>
+                    <option value="Customer B">Customer B</option>
+                    <option value="比亚迪">比亚迪</option>
+                    <option value="理想">理想</option>
+                  </select>
+                </label>
+                <label>
+                  项目类别 <span className="required">*</span>
+                  <select value={taskForm.project_category} onChange={(event) => setTaskForm({ ...taskForm, project_category: event.target.value })} required>
+                    <option value="">请选择</option>
+                    {projectCategories.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  BU <span className="required">*</span>
+                  <select value={taskForm.bu} onChange={(event) => setTaskForm({ ...taskForm, bu: event.target.value })} required>
+                    <option value="">请选择</option>
+                    {buOptions.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  项目等级 <span className="required">*</span>
+                  <select value={taskForm.project_level} onChange={(event) => setTaskForm({ ...taskForm, project_level: event.target.value })} required>
+                    <option value="">请选择</option>
+                    {projectLevels.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  MQ 人员 <span className="required">*</span>
+                  <select value={taskForm.mq_user_id} onChange={(event) => setTaskForm({ ...taskForm, mq_user_id: event.target.value })} required>
+                    <option value="">请选择</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>{user.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  对应 MP（项目经理） <span className="required">*</span>
+                  <input value={taskForm.mp_owner} onChange={(event) => setTaskForm({ ...taskForm, mp_owner: event.target.value })} placeholder="请输入项目经理姓名" required />
+                </label>
+                <label>
+                  小组 <span className="required">*</span>
+                  <select value={taskForm.group_name} onChange={(event) => setTaskForm({ ...taskForm, group_name: event.target.value })} required>
+                    <option value="">请选择</option>
+                    {groupOptions.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  计划量产时间
+                  <input type="date" value={taskForm.planned_mp_date} onChange={(event) => setTaskForm({ ...taskForm, planned_mp_date: event.target.value })} />
+                </label>
+              </div>
+              <label>
+                生产线体 <span className="required">*</span>
+                <select value={taskForm.production_line} onChange={(event) => setTaskForm({ ...taskForm, production_line: event.target.value })} required>
+                  <option value="">请选择</option>
+                  {productionLines.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                项目接收时间 <span className="required">*</span>
+                <input type="date" value={taskForm.receive_date} onChange={(event) => setTaskForm({ ...taskForm, receive_date: event.target.value })} required />
+              </label>
+              <div className="helper-text">首批机型共用该接收时间，后续批次通过加单补充。</div>
+              <div className="form-divider">机型</div>
+              {models.map((model, index) => (
+                <div className="model-row" key={`model-${index}`}>
+                  <input value={model} onChange={(event) => updateModel(index, event.target.value)} placeholder="如 NV08126/093" required={index === 0} />
+                  <button className="secondary-button" type="button" onClick={() => removeModel(index)} disabled={models.length === 1}>
+                    删除
+                  </button>
+                </div>
+              ))}
+              <button className="link-button compact-link" type="button" onClick={addModel}>
+                + 新增机型
+              </button>
+              <div className="form-divider">检查信息</div>
+              <label>
+                QG 节点 <span className="required">*</span>
+                <select value={taskForm.qg_node_id} onChange={(event) => setTaskForm({ ...taskForm, qg_node_id: event.target.value })} required>
+                  <option value="">请选择</option>
+                  {qgNodes.map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {node.node_code}
+                      {prepareResult?.recommended_qg_node?.id === node.id ? "（推荐）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="button-row">
+                <button type="submit">下一步：确认信息</button>
+              </div>
+            </form>
+          ) : (
+            <div className="stack">
+              <div className="confirm-grid">
+                <p><strong>VDrive：</strong>{prepareResult?.vdrive.folder_path || taskForm.vdrive_url}</p>
+                <p><strong>项目名称：</strong>{taskForm.project_name}</p>
+                <p><strong>客户：</strong>{taskForm.customer}</p>
+                <p><strong>项目类别：</strong>{taskForm.project_category}</p>
+                <p><strong>BU：</strong>{taskForm.bu}</p>
+                <p><strong>项目等级：</strong>{taskForm.project_level}</p>
+                <p><strong>MQ 人员：</strong>{selectedMqUser?.name || taskForm.mq_user_id}</p>
+                <p><strong>对应 MP：</strong>{taskForm.mp_owner}</p>
+                <p><strong>小组：</strong>{taskForm.group_name}</p>
+                <p><strong>计划量产时间：</strong>{taskForm.planned_mp_date || "-"}</p>
+                <p><strong>生产线体：</strong>{taskForm.production_line}</p>
+                <p><strong>项目接收时间：</strong>{taskForm.receive_date}</p>
+                <p><strong>机型：</strong>{cleanModels.join(" / ")}</p>
+                <p><strong>QG 节点：</strong>{selectedQGNode?.node_code || taskForm.qg_node_id}</p>
+              </div>
+              <div className="button-row">
+                <button className="secondary-button" type="button" onClick={() => setWizardStep("edit")}>
+                  返回修改
+                </button>
+                <button type="button" onClick={() => void handleCreateTask()}>
+                  开始点检
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
         <section className="module">
           <h2>任务列表</h2>
           <table>

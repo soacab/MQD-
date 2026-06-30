@@ -315,6 +315,61 @@ nav a:hover {
   line-height: 1.5;
 }
 
+.wizard-panel {
+  gap: 16px;
+}
+
+.form-grid,
+.confirm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
+.vdrive-row,
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.model-row button {
+  min-width: 72px;
+}
+
+.form-divider {
+  border-top: 1px solid #e0e4ea;
+  color: #687486;
+  font-size: 13px;
+  font-weight: 700;
+  padding-top: 12px;
+}
+
+.required {
+  color: #c83232;
+}
+
+.helper-text {
+  color: #687486;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.compact-link {
+  justify-self: start;
+  width: auto;
+}
+
+.confirm-grid p {
+  border-bottom: 1px solid #eef1f5;
+  padding-bottom: 8px;
+}
+
 .spaced {
   margin-top: 16px;
 }
@@ -487,7 +542,14 @@ tbody tr:hover {
   .two-column,
   .three-column,
   .filters,
+  .form-grid,
+  .confirm-grid,
   .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vdrive-row,
+  .model-row {
     grid-template-columns: 1fr;
   }
 }

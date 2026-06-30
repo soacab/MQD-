@@ -94,6 +94,14 @@ export type VDriveValidation = {
   folder_path: string;
 };
 
+export type InspectionTaskPrepare = {
+  vdrive: VDriveValidation;
+  has_history: boolean;
+  project: Project | null;
+  suggested_project_name: string;
+  recommended_qg_node: QGNode | null;
+};
+
 export type QGNode = {
   id: number;
   node_code: string;
@@ -467,7 +475,14 @@ export function listInspectionTasks() {
   return apiRequest<ListResult<InspectionTask>>("/api/v1/inspection-tasks");
 }
 
-export function createInspectionTask(payload: { project_id: number; qg_node_id: number }) {
+export function prepareInspectionTask(vdrive_url: string) {
+  return apiRequest<InspectionTaskPrepare>("/api/v1/inspection-tasks/prepare", {
+    method: "POST",
+    body: jsonBody({ vdrive_url })
+  });
+}
+
+export function createInspectionTask(payload: Record<string, unknown>) {
   return apiRequest<InspectionTask>("/api/v1/inspection-tasks", { method: "POST", body: jsonBody(payload) });
 }
 

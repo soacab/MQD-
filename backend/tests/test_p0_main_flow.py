@@ -345,6 +345,116 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(order.status_code, 400)
         self.assertEqual(order.json()["error"]["code"], "PROJECT_HAS_ACTIVE_TASK")
 
+    def test_prepare_inspection_task_uses_vdrive_folder_name_without_history(self):
+        prepared = self.client.post(
+            "/api/v1/inspection-tasks/prepare",
+            headers=self.headers,
+            json={"vdrive_url": "https://vdrive.example/indrive#/index?folderGuid=NEW-FOLDER"},
+        )
+
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        data = prepared.json()["data"]
+        self.assertFalse(data["has_history"])
+        self.assertIsNone(data["project"])
+        self.assertEqual(data["vdrive"]["folder_guid"], "NEW-FOLDER")
+        self.assertEqual(data["suggested_project_name"], "VDrive-NEW-FOLDER")
+        self.assertEqual(data["recommended_qg_node"]["node_code"], "QG2")
+
+    def test_prepare_inspection_task_prefills_history_and_recommends_next_qg(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "PREPARE_HISTORY_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+
+        prepared = self.client.post(
+            "/api/v1/inspection-tasks/prepare",
+            headers=self.headers,
+            json={"vdrive_url": "https://vdrive.example/indrive#/index?id=enterprise_folder-001"},
+        )
+
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        data = prepared.json()["data"]
+        self.assertTrue(data["has_history"])
+        self.assertEqual(data["project"]["id"], project_id)
+        self.assertEqual(data["project"]["project_name"], "MQD P0 Project")
+        self.assertEqual([model["model_name"] for model in data["project"]["models"]], ["M1", "M2"])
+        self.assertEqual(data["recommended_qg_node"]["node_code"], "QG3.1")
+
+    def test_create_inspection_task_from_wizard_creates_internal_project(self):
+        version = self.client.post(
+            "/api/v1/business-rule-versions",
+            headers=self.headers,
+            json={"qg_node_id": 1, "version_no": "V-WIZARD", "change_summary": "wizard create"},
+        )
+        self.assertEqual(version.status_code, 200, version.text)
+        version_id = version.json()["data"]["id"]
+        manual_rule = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "rule_code": "WIZARD_MANUAL",
+                "item_name": "Wizard manual item",
+                "item_type": "manual",
+                "check_type": "manual",
+                "checklist_requirement": "Engineer confirms wizard-created task.",
+                "owner_dept": "MQD",
+                "is_apqp": False,
+                "sort_order": 1,
+            },
+        )
+        self.assertEqual(manual_rule.status_code, 200, manual_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={
+                "vdrive_url": "https://vdrive.example/indrive#/index?folderGuid=WIZARD-FOLDER",
+                "project_name": "VDrive-WIZARD-FOLDER",
+                "customer": "Wizard Customer",
+                "project_category": "new_project",
+                "bu": "BU-W",
+                "project_level": "A",
+                "mq_user_id": 1,
+                "mp_owner": "MP Wizard",
+                "group_name": "MQD",
+                "planned_mp_date": "2026-11-01",
+                "production_line": "Line W",
+                "receive_date": "2026-07-10",
+                "models": ["W1"],
+                "qg_node_id": 1,
+            },
+        )
+
+        self.assertEqual(task.status_code, 200, task.text)
+        task_data = task.json()["data"]
+        self.assertEqual(task_data["status"], "running")
+        project = self.client.get(f"/api/v1/projects/{task_data['project_id']}", headers=self.headers)
+        self.assertEqual(project.status_code, 200, project.text)
+        project_data = project.json()["data"]
+        self.assertEqual(project_data["project_name"], "VDrive-WIZARD-FOLDER")
+        self.assertEqual(project_data["vdrive"]["folder_guid"], "WIZARD-FOLDER")
+        self.assertEqual([model["model_name"] for model in project_data["models"]], ["W1"])
+
     def test_rule_version_history_includes_current_marker_publisher_and_change_details(self):
         version = self.client.post(
             "/api/v1/business-rule-versions",

@@ -493,6 +493,48 @@ def project_detail(project: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def find_project_by_vdrive(vdrive: dict[str, Any]) -> dict[str, Any] | None:
+    return query_one(
+        """
+        SELECT * FROM projects
+        WHERE status = ? AND vdrive_folder_guid = ?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (ProjectStatus.NORMAL, vdrive["folder_guid"]),
+    )
+
+
+def first_active_qg_node() -> dict[str, Any] | None:
+    return query_one("SELECT * FROM qg_nodes WHERE is_active = 1 ORDER BY sort_order LIMIT 1")
+
+
+def recommended_qg_node_for_project(project_id: int | None) -> dict[str, Any] | None:
+    if project_id is None:
+        return first_active_qg_node()
+    latest_task = query_one(
+        """
+        SELECT q.sort_order FROM inspection_tasks t
+        JOIN qg_nodes q ON q.id = t.qg_node_id
+        WHERE t.project_id = ? AND t.status != ?
+        ORDER BY t.id DESC LIMIT 1
+        """,
+        (project_id, InspectionTaskStatus.VOIDED),
+    )
+    if not latest_task:
+        return first_active_qg_node()
+    return (
+        query_one(
+            """
+            SELECT * FROM qg_nodes
+            WHERE is_active = 1 AND sort_order > ?
+            ORDER BY sort_order LIMIT 1
+            """,
+            (latest_task["sort_order"],),
+        )
+        or first_active_qg_node()
+    )
+
+
 @app.get("/api/v1/projects/{project_id}")
 def get_project(project_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_business_scope(user)
@@ -878,35 +920,142 @@ def build_rule_snapshots(version_id: int) -> tuple[list[dict[str, Any]], list[di
     return business_snapshot, execution_snapshot
 
 
-@app.post("/api/v1/inspection-tasks")
-def create_inspection_task(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    project = row_or_404("SELECT * FROM projects WHERE id = ?", (payload["project_id"],), "PROJECT_NOT_FOUND", "项目不存在")
+@app.post("/api/v1/inspection-tasks/prepare")
+def prepare_inspection_task(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_permissions(user, {Permission.INSPECTION_ENGINEER, Permission.PROJECT_ADMIN})
+    vdrive = parse_vdrive_url(payload.get("vdrive_url", ""))
+    project = find_project_by_vdrive(vdrive)
+    project_payload = project_detail(project) if project else None
+    return ok(
+        {
+            "vdrive": vdrive,
+            "has_history": bool(project),
+            "project": project_payload,
+            "suggested_project_name": project["project_name"] if project else vdrive["folder_name"],
+            "recommended_qg_node": recommended_qg_node_for_project(project["id"] if project else None),
+        }
+    )
+
+
+def normalize_models(raw_models: Any) -> list[str]:
+    if isinstance(raw_models, str):
+        models = [item.strip() for item in raw_models.split(",")]
+    else:
+        models = [str(item).strip() for item in raw_models or []]
+    return [model for model in models if model]
+
+
+def ensure_wizard_payload(payload: dict[str, Any]) -> list[str]:
+    for field in ("vdrive_url", "project_name", "customer", "receive_date", "qg_node_id"):
+        if not payload.get(field):
+            raise BusinessError("INSPECTION_TASK_REQUIRED_FIELD", f"缺少必填字段 {field}")
+    models = normalize_models(payload.get("models"))
+    if not models:
+        raise BusinessError("INSPECTION_TASK_REQUIRED_FIELD", "至少填写 1 个机型")
+    return models
+
+
+def upsert_project_from_task_wizard(payload: dict[str, Any], user: dict[str, Any]) -> int:
+    models = ensure_wizard_payload(payload)
+    vdrive = parse_vdrive_url(payload.get("vdrive_url", ""))
+    mq_user = query_one("SELECT name FROM users WHERE id = ?", (payload.get("mq_user_id"),))
+    project = find_project_by_vdrive(vdrive)
+    if project:
+        execute(
+            """
+            UPDATE projects SET project_name = ?, customer = ?, project_category = ?, bu = ?,
+            project_level = ?, mq_user_id = ?, mq_user_name_snapshot = ?, mp_owner = ?,
+            group_name = ?, planned_mp_date = ?, production_line = ?, vdrive_url = ?,
+            vdrive_folder_guid = ?, vdrive_folder_id = ?, vdrive_folder_name = ?,
+            vdrive_folder_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+            """,
+            (
+                payload["project_name"],
+                payload["customer"],
+                payload.get("project_category"),
+                payload.get("bu"),
+                payload.get("project_level"),
+                payload.get("mq_user_id"),
+                mq_user["name"] if mq_user else None,
+                payload.get("mp_owner"),
+                payload.get("group_name"),
+                payload.get("planned_mp_date"),
+                payload.get("production_line"),
+                payload.get("vdrive_url"),
+                vdrive["folder_guid"],
+                vdrive["folder_id"],
+                vdrive["folder_name"],
+                vdrive["folder_path"],
+                project["id"],
+            ),
+        )
+        if not query_one("SELECT id FROM project_models WHERE project_id = ? LIMIT 1", (project["id"],)):
+            add_project_order_rows(project["id"], payload["receive_date"], models, user["id"])
+        audit("upsert_project_from_task_wizard", "project", project["id"], user["id"], payload)
+        return project["id"]
+
+    cur = execute(
+        """
+        INSERT INTO projects(
+            project_name, customer, project_category, bu, project_level, mq_user_id,
+            mq_user_name_snapshot, mp_owner, group_name, planned_mp_date, production_line,
+            vdrive_url, vdrive_folder_guid, vdrive_folder_id, vdrive_folder_name, vdrive_folder_path,
+            created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            payload["project_name"],
+            payload["customer"],
+            payload.get("project_category"),
+            payload.get("bu"),
+            payload.get("project_level"),
+            payload.get("mq_user_id"),
+            mq_user["name"] if mq_user else None,
+            payload.get("mp_owner"),
+            payload.get("group_name"),
+            payload.get("planned_mp_date"),
+            payload.get("production_line"),
+            payload.get("vdrive_url"),
+            vdrive["folder_guid"],
+            vdrive["folder_id"],
+            vdrive["folder_name"],
+            vdrive["folder_path"],
+            user["id"],
+        ),
+    )
+    project_id = cur.lastrowid
+    add_project_order_rows(project_id, payload["receive_date"], models, user["id"])
+    audit("create_project_from_task_wizard", "project", project_id, user["id"], payload)
+    return project_id
+
+
+def create_inspection_task_for_project(project_id: int, qg_node_id: int, user: dict[str, Any], audit_payload: dict[str, Any]) -> dict[str, Any]:
+    project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
     if project["status"] != ProjectStatus.NORMAL:
         raise BusinessError("PROJECT_DELETED", "已删除项目不能创建点检任务")
     if not project["vdrive_folder_guid"] or not project["vdrive_folder_id"]:
         raise BusinessError("PROJECT_VDRIVE_REQUIRED", "项目缺少 VDrive 文件夹标识")
     version = query_one(
         "SELECT * FROM business_rule_versions WHERE qg_node_id = ? AND status = ? ORDER BY id DESC LIMIT 1",
-        (payload["qg_node_id"], RuleVersionStatus.PUBLISHED),
+        (qg_node_id, RuleVersionStatus.PUBLISHED),
     )
     if not version:
         raise BusinessError("PUBLISHED_RULE_VERSION_REQUIRED", "当前 QG 节点没有已发布规则版本")
     active = query_one(
         "SELECT * FROM inspection_tasks WHERE project_id = ? AND qg_node_id = ? AND status IN (?, ?)",
-        (payload["project_id"], payload["qg_node_id"], InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING),
+        (project_id, qg_node_id, InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING),
     )
     if active:
         raise BusinessError("ACTIVE_TASK_EXISTS", "同项目同节点已有进行中或整改中任务")
 
-    task_no = f"IT-{payload['project_id']}-{payload['qg_node_id']}-{version['id']}"
+    task_no = f"IT-{project_id}-{qg_node_id}-{version['id']}"
     with transaction():
         cur = execute(
             """
             INSERT INTO inspection_tasks(project_id, qg_node_id, task_no, status, current_round_no, created_by)
             VALUES (?, ?, ?, ?, 1, ?)
             """,
-            (payload["project_id"], payload["qg_node_id"], task_no, InspectionTaskStatus.RUNNING, user["id"]),
+            (project_id, qg_node_id, task_no, InspectionTaskStatus.RUNNING, user["id"]),
         )
         task_id = cur.lastrowid
         business_snapshot, execution_snapshot = build_rule_snapshots(version["id"])
@@ -932,14 +1081,14 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
                 latest_round_no, business_rule_version_no, generated_by
             ) VALUES (?, ?, ?, ?, 1, ?, ?)
             """,
-            (task_id, project["id"], payload["qg_node_id"], f"REP-{task_id}", version["version_no"], user["id"]),
+            (task_id, project["id"], qg_node_id, f"REP-{task_id}", version["version_no"], user["id"]),
         )
-        audit("create_inspection_task", "inspection_task", task_id, user["id"], payload)
+        audit("create_inspection_task", "inspection_task", task_id, user["id"], audit_payload)
     return ok(
         {
             "inspection_task_id": task_id,
             "project_id": project["id"],
-            "qg_node_id": payload["qg_node_id"],
+            "qg_node_id": qg_node_id,
             "status": InspectionTaskStatus.RUNNING.value,
             "current_round_no": 1,
             "round_id": round_id,
@@ -947,6 +1096,17 @@ def create_inspection_task(payload: dict = Body(...), user: dict = Depends(curre
             "report_id": report_cur.lastrowid,
         }
     )
+
+
+@app.post("/api/v1/inspection-tasks")
+def create_inspection_task(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
+    if payload.get("project_id"):
+        if not payload.get("qg_node_id"):
+            raise BusinessError("INSPECTION_TASK_REQUIRED_FIELD", "缺少必填字段 qg_node_id")
+        return create_inspection_task_for_project(int(payload["project_id"]), int(payload["qg_node_id"]), user, payload)
+    project_id = upsert_project_from_task_wizard(payload, user)
+    return create_inspection_task_for_project(project_id, int(payload["qg_node_id"]), user, payload)
 
 
 def generate_items_for_round(task_id: int, round_id: int, business_snapshot: list[dict[str, Any]], execution_snapshot: list[dict[str, Any]], only_rule_codes: set[str] | None = None) -> None:
