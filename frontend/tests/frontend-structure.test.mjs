@@ -144,8 +144,10 @@ describe("frontend structure", () => {
 
   it("supports P0 experience hardening for VDrive, rules, and dashboard", () => {
     const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
+    const homePage = readFileSync(resolve(root, "app/page.tsx"), "utf8");
     const projectsPage = readFileSync(resolve(root, "app/projects/page.tsx"), "utf8");
     const inspectionPage = readFileSync(resolve(root, "app/inspection/page.tsx"), "utf8");
+    const rectificationPage = readFileSync(resolve(root, "app/rectification/page.tsx"), "utf8");
     const rulesPage = readFileSync(resolve(root, "app/rules/page.tsx"), "utf8");
 
     for (const snippet of [
@@ -159,6 +161,18 @@ describe("frontend structure", () => {
 
     for (const snippet of ["getProject(", "validateVdriveLink(", "vdrivePreview", "校验 VDrive 路径"]) {
       assert.match(inspectionPage, new RegExp(snippet.replaceAll("(", "\\(")), `inspection page should contain ${snippet}`);
+    }
+
+    for (const snippet of ["archiveSummary", "window.confirm", "归档前确认", "归档后可进入报告页查看结论"]) {
+      assert.match(inspectionPage, new RegExp(snippet.replaceAll("(", "\\(")), `inspection page should contain ${snippet}`);
+    }
+
+    for (const snippet of ["confirmRectificationAction", "confirmRecheckAction", "window.confirm", "复查已触发，可返回点检页执行新轮次"]) {
+      assert.match(rectificationPage, new RegExp(snippet.replaceAll("(", "\\(")), `rectification page should contain ${snippet}`);
+    }
+
+    for (const snippet of ["todoActionLabel", "打开任务", "处理整改", "查看报告", "登录后显示你的待办入口"]) {
+      assert.match(homePage, new RegExp(snippet.replaceAll("(", "\\(")), `home page should contain ${snippet}`);
     }
 
     for (const snippet of ["deleteConfirmName", "手动输入项目名称", "confirm_project_name: deleteConfirmName"]) {

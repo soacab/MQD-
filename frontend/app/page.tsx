@@ -28,6 +28,16 @@ const todoSections = [
   { key: "archive_ready", label: "待归档" }
 ];
 
+function todoActionLabel(todo: DashboardTodo) {
+  if (todo.type === "rectification_item" || todo.type === "followup_item") {
+    return "处理整改";
+  }
+  if (todo.type === "archive_ready" || todo.type === "running_task" || todo.type === "recheck_task") {
+    return "打开任务";
+  }
+  return "查看报告";
+}
+
 export default function Page() {
   const [health, setHealth] = useState({ status: "loading", reachable: false });
   const [overview, setOverview] = useState<DashboardOverview>(defaultOverview);
@@ -44,7 +54,7 @@ export default function Page() {
         setTodos(todoResult.items);
         setMessage("");
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "登录后可查看个人待办。");
+        setMessage(error instanceof Error ? error.message : "登录后显示你的待办入口。");
       }
     }
     void loadDashboard();
@@ -76,7 +86,7 @@ export default function Page() {
           <div className={health.reachable ? "status ok" : "status warn"}>后端 /health: {health.status}</div>
         </header>
 
-        {message ? <p className="notice">{message}</p> : null}
+        {message ? <p className="notice">{message}</p> : <p className="notice">登录后显示你的待办入口，可直接打开任务、处理整改或查看报告。</p>}
 
         <section className="summary">
           <div>
@@ -112,7 +122,7 @@ export default function Page() {
                     {sectionTodos.map((todo) => (
                       <li key={`${todo.type}-${todo.target_id}`}>
                         <a className="module-link" href={todo.href}>
-                          {todo.title || todo.project_name || `任务 ${todo.task_id || todo.target_id}`}
+                          {todoActionLabel(todo)}：{todo.title || todo.project_name || `任务 ${todo.task_id || todo.target_id}`}
                         </a>
                         <p>{todo.summary || todo.status}</p>
                       </li>

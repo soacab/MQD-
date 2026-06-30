@@ -167,9 +167,13 @@ export default function InspectionPage() {
     if (!selectedTask?.id) {
       return;
     }
+    const archiveSummary = `归档前确认\n\n任务：${selectedTask.task_no || selectedTask.id}\n当前轮次：${selectedTask.current_round_no}\n检查项：${confirmedCount}/${items.length} 已确认\n\n归档后可进入报告页查看结论，并按结论处理整改或待跟进。`;
+    if (!window.confirm(archiveSummary)) {
+      return;
+    }
     try {
       const result = await archiveCurrentRound(selectedTask.id);
-      setMessage(`归档完成，结论：${String(result.overall_result || "")}`);
+      setMessage(`归档完成，结论：${String(result.overall_result || "")}。归档后可进入报告页查看结论。`);
       await refreshTasks();
       await loadTask(selectedTask.id);
     } catch (error) {
@@ -286,6 +290,9 @@ export default function InspectionPage() {
                 </li>
               ))}
             </ul>
+            <p className="notice">
+              归档前确认：当前轮 {confirmedCount}/{items.length} 项已确认。
+            </p>
             <button type="button" disabled={!canArchive} onClick={handleArchive}>
               触发归档
             </button>

@@ -39,6 +39,9 @@ export default function RectificationPage() {
   }
 
   async function handleMarkDone(itemId: number) {
+    if (!confirmRectificationAction("确认将该整改项标记为完成？")) {
+      return;
+    }
     try {
       await markRectificationDone(itemId);
       setMessage("整改项已标记完成。");
@@ -49,6 +52,9 @@ export default function RectificationPage() {
   }
 
   async function handleUndo(itemId: number) {
+    if (!confirmRectificationAction("确认撤销该整改项的完成标记？")) {
+      return;
+    }
     try {
       await undoRectificationDone(itemId);
       setMessage("整改完成标记已撤销。");
@@ -59,6 +65,9 @@ export default function RectificationPage() {
   }
 
   async function handleCloseFollowup(itemId: number) {
+    if (!confirmRectificationAction("确认将该待跟进项标记为已落实？")) {
+      return;
+    }
     try {
       await closeFollowup(itemId);
       setMessage("待跟进项已落实。");
@@ -73,13 +82,24 @@ export default function RectificationPage() {
       setMessage("请先输入任务 ID。");
       return;
     }
+    if (!confirmRecheckAction(`确认触发任务 ${taskId} 的复查？\n\n系统将创建下一轮，只复查上一轮不满足项。`)) {
+      return;
+    }
     try {
       const result = await triggerRecheck(Number(taskId));
-      setMessage(`复查已触发，新轮次：${String(result.new_round_no || "")}`);
+      setMessage(`复查已触发，新轮次：${String(result.new_round_no || "")}。复查已触发，可返回点检页执行新轮次。`);
       await refresh(taskId);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "触发复查失败");
     }
+  }
+
+  function confirmRectificationAction(message: string) {
+    return window.confirm(message);
+  }
+
+  function confirmRecheckAction(message: string) {
+    return window.confirm(message);
   }
 
   const allDone = rectifications.length > 0 && rectifications.every((item) => item.marked_done_at);
