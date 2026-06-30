@@ -53,6 +53,12 @@ class AuthPermissionTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["data"]
 
+    def _audit_actions_for_entity(self, entity_type: str, entity_id: int | None) -> list[str]:
+        response = self.client.get("/api/v1/audit-logs", headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        rows = response.json()["data"]["items"]
+        return [row["action"] for row in rows if row["entity_type"] == entity_type and row["entity_id"] == entity_id]
+
     def _create_project(self, name: str, folder_guid: str) -> int:
         response = self.client.post(
             "/api/v1/projects",
@@ -477,6 +483,112 @@ class AuthPermissionTest(unittest.TestCase):
         fetched = self.client.get(f"/api/v1/projects/{project_id}", headers=self.admin_headers)
         self.assertEqual(fetched.status_code, 200, fetched.text)
         self.assertEqual(fetched.json()["data"]["mq_user_name_snapshot"], "SNAPSHOT_USER")
+
+    def test_disabled_user_cannot_login_and_existing_token_is_rejected(self):
+        user = self._create_user("disable_lifecycle", ["inspection_engineer"])
+        headers = self._login_headers("disable_lifecycle")
+
+        disabled = self.client.post(f"/api/v1/users/{user['id']}/disable", headers=self.admin_headers)
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+
+        relogin = self.client.post(
+            "/api/v1/auth/login",
+            json={"uid": "disable_lifecycle", "password": "disable_lifecycle"},
+        )
+        self.assertEqual(relogin.status_code, 401, relogin.text)
+
+        me = self.client.get("/api/v1/auth/me", headers=headers)
+        self.assertEqual(me.status_code, 401, me.text)
+        self.assertEqual(me.json()["error"]["code"], "UNAUTHORIZED")
+
+        enabled = self.client.post(f"/api/v1/users/{user['id']}/enable", headers=self.admin_headers)
+        self.assertEqual(enabled.status_code, 200, enabled.text)
+
+        relogin_after_enable = self.client.post(
+            "/api/v1/auth/login",
+            json={"uid": "disable_lifecycle", "password": "disable_lifecycle"},
+        )
+        self.assertEqual(relogin_after_enable.status_code, 200, relogin_after_enable.text)
+
+    def test_deleted_user_cannot_login_and_history_snapshot_remains_readable(self):
+        user = self._create_user("delete_lifecycle", ["inspection_engineer"])
+        project = self.client.post(
+            "/api/v1/projects",
+            headers=self.admin_headers,
+            json={
+                "project_name": "P-delete-lifecycle",
+                "customer": "ACME",
+                "receive_date": "2026-06-30",
+                "mq_user_id": user["id"],
+                "vdrive_url": "https://vdrive.example.com/?folderGuid=DELETE-LIFECYCLE",
+            },
+        )
+        self.assertEqual(project.status_code, 200, project.text)
+        project_id = project.json()["data"]["id"]
+
+        deleted = self.client.delete(f"/api/v1/users/{user['id']}", headers=self.admin_headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"uid": "delete_lifecycle", "password": "delete_lifecycle"},
+        )
+        self.assertEqual(login.status_code, 401, login.text)
+
+        fetched = self.client.get(f"/api/v1/projects/{project_id}", headers=self.admin_headers)
+        self.assertEqual(fetched.status_code, 200, fetched.text)
+        self.assertEqual(fetched.json()["data"]["mq_user_name_snapshot"], "DELETE_LIFECYCLE")
+
+    def test_account_lifecycle_and_settings_write_audit_logs(self):
+        user = self._create_user("audit_lifecycle", ["inspection_engineer"])
+
+        updated = self.client.put(
+            f"/api/v1/users/{user['id']}",
+            headers=self.admin_headers,
+            json={
+                "name": "Audit Lifecycle Updated",
+                "email": "audit-updated@example.com",
+                "status": "active",
+                "permissions": ["inspection_engineer", "rules_admin"],
+            },
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+
+        permission_update = self.client.put(
+            f"/api/v1/users/{user['id']}/permissions",
+            headers=self.admin_headers,
+            json={"permissions": ["inspection_engineer"]},
+        )
+        self.assertEqual(permission_update.status_code, 200, permission_update.text)
+
+        disabled = self.client.post(f"/api/v1/users/{user['id']}/disable", headers=self.admin_headers)
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+
+        enabled = self.client.post(f"/api/v1/users/{user['id']}/enable", headers=self.admin_headers)
+        self.assertEqual(enabled.status_code, 200, enabled.text)
+
+        deleted = self.client.delete(f"/api/v1/users/{user['id']}", headers=self.admin_headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+
+        settings = self.client.put(
+            "/api/v1/system-settings/auto_check_enabled",
+            headers=self.admin_headers,
+            json={"value": False},
+        )
+        self.assertEqual(settings.status_code, 200, settings.text)
+
+        self.assertEqual(
+            self._audit_actions_for_entity("user", user["id"]),
+            [
+                "delete_user",
+                "enable_user",
+                "disable_user",
+                "update_user_permissions",
+                "update_user",
+                "create_user",
+            ],
+        )
+        self.assertIn("save_system_setting", self._audit_actions_for_entity("system_setting", None))
 
     def test_account_protection_rules(self):
         other_manager = self._create_user("other_manager", ["super_admin"])

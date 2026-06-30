@@ -33,6 +33,13 @@ export function saveSession(result: LoginResult): void {
   window.localStorage.setItem(USER_KEY, JSON.stringify(result.user));
 }
 
+export function updateStoredUser(user: User): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
 export function clearSession(): void {
   if (typeof window === "undefined") {
     return;

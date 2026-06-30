@@ -13,6 +13,7 @@ import {
   updateUser,
   type User
 } from "@/lib/api";
+import { updateStoredUser } from "@/lib/session";
 
 const permissionOptions = [
   { key: "inspection_engineer", label: "点检执行", description: "可以创建和执行点检任务。" },
@@ -46,6 +47,7 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
 
   const canManageAccounts = Boolean(currentUser?.permissions.includes("super_admin"));
+  const isEditingCurrentUser = Boolean(currentUser && editingUserId === currentUser.id);
   const activeCount = users.filter((item) => item.status === "active").length;
 
   async function refresh({ clearMessage = true }: { clearMessage?: boolean } = {}) {
@@ -75,6 +77,10 @@ export default function AdminPage() {
   }
 
   function togglePermission(permission: string) {
+    if (isEditingCurrentUser && permission === "super_admin" && form.permissions.includes("super_admin")) {
+      setMessage("不能取消自己的权限管理权限。");
+      return;
+    }
     setForm((current) => {
       const permissions = current.permissions.includes(permission)
         ? current.permissions.filter((item) => item !== permission)
@@ -99,6 +105,10 @@ export default function AdminPage() {
     });
   }
 
+  function isCurrentUser(user: User) {
+    return currentUser?.id === user.id;
+  }
+
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canManageAccounts) {
@@ -109,15 +119,27 @@ export default function AdminPage() {
       setMessage("请至少选择一个用户权限。");
       return;
     }
+    if (isEditingCurrentUser && form.status !== "active") {
+      setMessage("不能停用当前登录账号。");
+      return;
+    }
+    if (isEditingCurrentUser && !form.permissions.includes("super_admin")) {
+      setMessage("不能取消自己的权限管理权限。");
+      return;
+    }
 
     try {
       if (editingUserId) {
-        await updateUser(editingUserId, {
+        const savedUser = await updateUser(editingUserId, {
           name: form.name,
           email: form.email,
           status: form.status,
           permissions: form.permissions
         });
+        if (currentUser?.id === savedUser.id) {
+          updateStoredUser(savedUser);
+          setCurrentUser(savedUser);
+        }
         setMessage("账号已更新。");
       } else {
         await createUser({
@@ -141,6 +163,10 @@ export default function AdminPage() {
       setMessage("只读模式：仅权限管理员可编辑用户和权限。");
       return;
     }
+    if (isCurrentUser(user)) {
+      setMessage("不能停用当前登录账号。");
+      return;
+    }
     try {
       if (user.status === "active") {
         await disableUser(user.id);
@@ -158,6 +184,10 @@ export default function AdminPage() {
   async function handleDelete(user: User) {
     if (!canManageAccounts) {
       setMessage("只读模式：仅权限管理员可编辑用户和权限。");
+      return;
+    }
+    if (isCurrentUser(user)) {
+      setMessage("不能删除当前登录账号。");
       return;
     }
     const confirmed = window.confirm(`确认删除 UID\n\n${user.name} · ${user.uid}\n\n删除后该 UID 将无法登录 CheckFlow，历史检查记录和报告数据会保留。`);
@@ -240,7 +270,7 @@ export default function AdminPage() {
                   type="checkbox"
                   checked={form.permissions.includes(permission.key)}
                   onChange={() => togglePermission(permission.key)}
-                  disabled={!canManageAccounts}
+                  disabled={!canManageAccounts || (isEditingCurrentUser && permission.key === "super_admin")}
                 />
                 {permission.label}
               </label>
@@ -252,7 +282,7 @@ export default function AdminPage() {
               name="status"
               value={form.status}
               onChange={(event) => updateFormField("status", event.target.value)}
-              disabled={!canManageAccounts}
+              disabled={!canManageAccounts || isEditingCurrentUser}
             >
               <option value="active">启用</option>
               <option value="disabled">停用</option>
@@ -343,10 +373,10 @@ export default function AdminPage() {
                     <button className="secondary-button" type="button" onClick={() => startEdit(item)} disabled={!canManageAccounts}>
                       编辑
                     </button>
-                    <button className="secondary-button" type="button" onClick={() => handleToggleStatus(item)} disabled={!canManageAccounts}>
+                    <button className="secondary-button" type="button" onClick={() => handleToggleStatus(item)} disabled={!canManageAccounts || isCurrentUser(item)}>
                       {item.status === "active" ? "停用" : "启用"}
                     </button>
-                    <button className="danger-button" type="button" onClick={() => handleDelete(item)} disabled={!canManageAccounts}>
+                    <button className="danger-button" type="button" onClick={() => handleDelete(item)} disabled={!canManageAccounts || isCurrentUser(item)}>
                       删除
                     </button>
                   </div>

@@ -52,6 +52,7 @@ describe("frontend structure", () => {
     assert.match(session, /localStorage/);
     assert.match(session, /getStoredToken/);
     assert.match(session, /saveSession/);
+    assert.match(session, /updateStoredUser/);
     assert.match(session, /clearSession/);
   });
 
@@ -112,6 +113,22 @@ describe("frontend structure", () => {
       "deleteUser("
     ]) {
       assert.match(api, new RegExp(snippet.replaceAll("(", "\\(").replaceAll("?", "\\?")), `api should contain ${snippet}`);
+    }
+  });
+
+  it("guards the current user in account administration UI", () => {
+    const adminPage = readFileSync(resolve(root, "app/admin/page.tsx"), "utf8");
+
+    for (const snippet of [
+      "updateStoredUser",
+      "isEditingCurrentUser",
+      "isCurrentUser(item)",
+      "不能停用当前登录账号",
+      "不能删除当前登录账号",
+      "不能取消自己的权限管理权限",
+      "disabled={!canManageAccounts || isCurrentUser(item)}"
+    ]) {
+      assert.match(adminPage, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `admin page should contain ${snippet}`);
     }
   });
 });
