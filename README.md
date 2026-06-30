@@ -93,10 +93,12 @@ PYTHONPATH=backend uv run python -c "from app.core.database import create_schema
 ### 测试
 
 ```bash
-python3 -m unittest backend.tests.test_p0_main_flow -v
+.venv/bin/python -m unittest discover -s backend/tests -p "test_*.py" -v
 cd frontend
 npm test
 ```
+
+当前默认后端验收使用项目 `.venv` 中的 `unittest`。`uv run pytest` 暂不作为默认测试入口；在修正本机 Python / pytest 环境和依赖配置前，它可能不会加载项目 `.venv` 中的 FastAPI 依赖。
 
 ## Docker 化节奏
 
