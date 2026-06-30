@@ -554,6 +554,73 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(project_data["vdrive"]["folder_guid"], "WIZARD-FOLDER")
         self.assertEqual([model["model_name"] for model in project_data["models"]], ["W1"])
 
+    def test_create_inspection_task_from_wizard_rolls_back_project_when_later_step_fails(self):
+        from app.core.database import query_all
+
+        version = self.client.post(
+            "/api/v1/business-rule-versions",
+            headers=self.headers,
+            json={"qg_node_id": 1, "version_no": "V-WIZARD-ROLLBACK", "change_summary": "wizard rollback"},
+        )
+        self.assertEqual(version.status_code, 200, version.text)
+        version_id = version.json()["data"]["id"]
+        manual_rule = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "rule_code": "WIZARD_ROLLBACK_MANUAL",
+                "item_name": "Wizard rollback manual item",
+                "item_type": "manual",
+                "check_type": "manual",
+                "checklist_requirement": "Engineer confirms wizard rollback.",
+                "owner_dept": "MQD",
+                "is_apqp": False,
+                "sort_order": 1,
+            },
+        )
+        self.assertEqual(manual_rule.status_code, 200, manual_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+
+        with patch("app.services.inspection_service.generate_items_for_round", side_effect=RuntimeError("forced failure")):
+            failed = self.client.post(
+                "/api/v1/inspection-tasks",
+                headers=self.headers,
+                json={
+                    "vdrive_url": "https://vdrive.example/indrive#/index?folderGuid=WIZARD-ROLLBACK-FOLDER",
+                    "project_name": "VDrive-WIZARD-ROLLBACK-FOLDER",
+                    "customer": "Wizard Rollback Customer",
+                    "project_category": "new_project",
+                    "bu": "BU-WR",
+                    "project_level": "A",
+                    "mq_user_id": 1,
+                    "mp_owner": "MP Wizard Rollback",
+                    "group_name": "MQD",
+                    "planned_mp_date": "2026-11-02",
+                    "production_line": "Line WR",
+                    "receive_date": "2026-07-11",
+                    "models": ["WR1"],
+                    "qg_node_id": 1,
+                },
+            )
+
+        self.assertEqual(failed.status_code, 500)
+        self.assertEqual(query_all("SELECT * FROM projects"), [])
+        self.assertEqual(query_all("SELECT * FROM project_orders"), [])
+        self.assertEqual(query_all("SELECT * FROM project_models"), [])
+        self.assertEqual(query_all("SELECT * FROM inspection_tasks"), [])
+        self.assertEqual(query_all("SELECT * FROM rule_snapshots"), [])
+        self.assertEqual(query_all("SELECT * FROM inspection_rounds"), [])
+        self.assertEqual(query_all("SELECT * FROM inspection_items"), [])
+        self.assertEqual(query_all("SELECT * FROM inspection_reports"), [])
+        self.assertEqual(
+            query_all(
+                "SELECT * FROM audit_logs WHERE action IN (?, ?)",
+                ("create_project_from_task_wizard", "upsert_project_from_task_wizard"),
+            ),
+            [],
+        )
+
     def test_rule_version_history_includes_current_marker_publisher_and_change_details(self):
         version = self.client.post(
             "/api/v1/business-rule-versions",

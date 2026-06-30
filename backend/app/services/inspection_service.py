@@ -200,8 +200,9 @@ def create_inspection_task(payload: dict[str, Any], user: dict[str, Any]) -> dic
         if not payload.get("qg_node_id"):
             raise BusinessError("INSPECTION_TASK_REQUIRED_FIELD", "缺少必填字段 qg_node_id")
         return create_inspection_task_for_project(int(payload["project_id"]), int(payload["qg_node_id"]), user, payload)
-    project_id = upsert_project_from_task_wizard(payload, user)
-    return create_inspection_task_for_project(project_id, int(payload["qg_node_id"]), user, payload)
+    with transaction():
+        project_id = upsert_project_from_task_wizard(payload, user)
+        return create_inspection_task_for_project(project_id, int(payload["qg_node_id"]), user, payload)
 
 
 def generate_items_for_round(task_id: int, round_id: int, business_snapshot: list[dict[str, Any]], execution_snapshot: list[dict[str, Any]], only_rule_codes: set[str] | None = None) -> None:

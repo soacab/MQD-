@@ -267,6 +267,23 @@ describe("frontend structure", () => {
     assert.match(inspectionPage, /关联项目基础信息/, "inspection page should frame project fields as linked task context");
     assert.match(inspectionPage, /VDrive 扫描、文件内容解析、QMS\/UCM 直连仍为 mock 或未接入真实接口/, "inspection page should disclose external integration limits");
     assert.doesNotMatch(inspectionPage, /<h2>新建检查任务<\/h2>/, "inspection page should not use inconsistent task naming");
+
+    const payloadStart = inspectionPage.indexOf("const task = await createInspectionTask({");
+    const payloadEnd = inspectionPage.indexOf("});", payloadStart);
+    assert.notEqual(payloadStart, -1, "inspection page should create tasks through createInspectionTask");
+    assert.notEqual(payloadEnd, -1, "inspection task payload should be a concrete object");
+    const createTaskPayload = inspectionPage.slice(payloadStart, payloadEnd);
+    for (const snippet of [
+      "project_category: taskForm.project_category",
+      "bu: taskForm.bu",
+      "project_level: taskForm.project_level",
+      "mq_user_id: Number(taskForm.mq_user_id)",
+      "mp_owner: taskForm.mp_owner",
+      "group_name: taskForm.group_name",
+      "production_line: taskForm.production_line"
+    ]) {
+      assert.match(createTaskPayload, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `task creation payload should contain ${snippet}`);
+    }
   });
 
   it("aligns reports page with the inspection archive project list", () => {
