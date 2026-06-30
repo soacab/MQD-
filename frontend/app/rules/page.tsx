@@ -23,6 +23,7 @@ export default function RulesPage() {
   const [selectedVersion, setSelectedVersion] = useState<RuleVersion | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
+  const [publishPending, setPublishPending] = useState(false);
   const [message, setMessage] = useState("");
   const [versionForm, setVersionForm] = useState({ qg_node_id: "1", version_no: "V01", change_summary: "P0 演示规则" });
   const [ruleForm, setRuleForm] = useState({
@@ -31,7 +32,10 @@ export default function RulesPage() {
     item_type: "manual",
     check_type: "manual",
     checklist_requirement: "工程师确认检查结论",
-    owner_dept: "MQD"
+    owner_dept: "MQD",
+    is_apqp: "false",
+    sort_order: "0",
+    is_active: "true"
   });
   const canManageRules = Boolean(currentUser?.permissions.includes("rules_admin"));
 
@@ -94,12 +98,14 @@ export default function RulesPage() {
       return;
     }
     try {
-      const editablePayload = { ...ruleForm };
+      const editablePayload = {
+        ...ruleForm,
+        is_apqp: ruleForm.is_apqp === "true",
+        is_active: ruleForm.is_active === "true",
+        sort_order: Number(ruleForm.sort_order || 0)
+      };
       const createPayload = {
-        ...editablePayload,
-        sort_order: selectedVersion.business_check_rules?.length || 0,
-        is_active: true,
-        is_apqp: false
+        ...editablePayload
       };
       const rule = editingRuleId
         ? await updateBusinessRule(editingRuleId, editablePayload)
@@ -130,13 +136,17 @@ export default function RulesPage() {
       setMessage("只读模式：规则管理员可发布版本。");
       return;
     }
-    const confirmed = window.confirm(`发布前确认\n\n版本：${selectedVersion.version_no}\n变更说明：${selectedVersion.change_summary || "无"}\n\n发布后该版本将不可编辑。`);
-    if (!confirmed) {
+    setPublishPending(true);
+  }
+
+  async function confirmPublish() {
+    if (!selectedVersion) {
       return;
     }
     try {
       const version = await publishRuleVersion(selectedVersion.id);
       setSelectedVersion(version);
+      setPublishPending(false);
       setMessage("规则版本已发布。");
       await refresh(version.qg_node_id);
     } catch (error) {
@@ -152,9 +162,39 @@ export default function RulesPage() {
       item_type: rule.item_type,
       check_type: rule.check_type,
       checklist_requirement: rule.checklist_requirement || "",
-      owner_dept: rule.owner_dept || ""
+      owner_dept: rule.owner_dept || "",
+      is_apqp: rule.is_apqp ? "true" : "false",
+      sort_order: String(rule.sort_order ?? 0),
+      is_active: rule.is_active ? "true" : "false"
     });
   }
+
+  async function stopManualRule(rule: BusinessRule) {
+    if (!canManageRules || selectedVersion?.status !== "draft") {
+      setMessage("只读模式：只有草稿版本可停用人工检查项。");
+      return;
+    }
+    if (rule.item_type !== "manual") {
+      setMessage("自动检查项不可删除；可通过启用状态控制是否进入新任务。");
+      return;
+    }
+    try {
+      await updateBusinessRule(rule.id, { is_active: false });
+      setMessage("人工检查项已停用。");
+      if (selectedVersion) {
+        await handleSelectVersion(selectedVersion.id);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "停用人工检查项失败");
+    }
+  }
+
+  const draftChangeDetails =
+    selectedVersion?.business_check_rules?.map((rule) => ({
+      rule_code: rule.rule_code,
+      item_name: rule.item_name,
+      change_type: rule.is_active ? "added" : "disabled"
+    })) || [];
 
   const groupedRules = {
     manual: selectedVersion?.business_check_rules?.filter((rule) => rule.item_type === "manual" || rule.item_type === "inherit") || [],
@@ -255,6 +295,24 @@ export default function RulesPage() {
               disabled={!canManageRules}
             />
           </label>
+          <label>
+            APQP
+            <select value={ruleForm.is_apqp} onChange={(event) => setRuleForm({ ...ruleForm, is_apqp: event.target.value })} disabled={!canManageRules}>
+              <option value="false">否</option>
+              <option value="true">是</option>
+            </select>
+          </label>
+          <label>
+            排序
+            <input value={ruleForm.sort_order} onChange={(event) => setRuleForm({ ...ruleForm, sort_order: event.target.value })} disabled={!canManageRules} />
+          </label>
+          <label>
+            启用状态
+            <select value={ruleForm.is_active} onChange={(event) => setRuleForm({ ...ruleForm, is_active: event.target.value })} disabled={!canManageRules}>
+              <option value="true">启用</option>
+              <option value="false">停用</option>
+            </select>
+          </label>
           <button type="submit" disabled={!canManageRules || selectedVersion?.status !== "draft"}>{editingRuleId ? "更新检查项" : "保存检查项"}</button>
         </form>
       </section>
@@ -267,8 +325,11 @@ export default function RulesPage() {
                 <th>ID</th>
                 <th>版本</th>
                 <th>状态</th>
+                <th>当前版本</th>
                 <th>变更说明</th>
+                <th>发布人</th>
                 <th>发布时间</th>
+                <th>变更详情</th>
               </tr>
             </thead>
             <tbody>
@@ -277,8 +338,11 @@ export default function RulesPage() {
                   <td>{version.id}</td>
                   <td>{version.version_no}</td>
                   <td>{version.status}</td>
+                  <td>{version.is_current ? "当前版本" : "-"}</td>
                   <td>{version.change_summary || "-"}</td>
+                  <td>{version.published_by_name || "-"}</td>
                   <td>{version.published_at || "-"}</td>
+                  <td>{version.change_details?.map((item) => `${item.rule_code}:${item.change_type}`).join(" / ") || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -295,12 +359,33 @@ export default function RulesPage() {
                 发布规则版本
               </button>
               <p>发布前确认：{selectedVersion.change_summary || "未填写变更说明"}</p>
+              {publishPending ? (
+                <div className="notice">
+                  <strong>确认发布规则版本</strong>
+                  <p>版本：{selectedVersion.version_no}</p>
+                  <p>本次总体规则版本变更说明：{selectedVersion.change_summary || "无"}</p>
+                  <ul className="plain-list">
+                    {draftChangeDetails.map((item) => (
+                      <li key={item.rule_code}>
+                        {item.rule_code}：{item.item_name}（{item.change_type}）
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="button-row">
+                    <button type="button" onClick={confirmPublish}>确认发布规则版本</button>
+                    <button type="button" className="secondary-button" onClick={() => setPublishPending(false)}>取消</button>
+                  </div>
+                </div>
+              ) : null}
               <h3>人工检查项</h3>
               <ul className="plain-list">
                 {groupedRules.manual.map((rule) => (
                   <li key={rule.id}>
                     <button className="link-button" type="button" onClick={() => startEditRule(rule)}>
-                      {rule.rule_code}：{rule.item_name}（{rule.item_type}）
+                      {rule.rule_code}：{rule.item_name}（{rule.item_type} / APQP：{rule.is_apqp ? "是" : "否"} / 状态：{rule.is_active ? "启用" : "停用"} / 排序：{rule.sort_order}）
+                    </button>
+                    <button type="button" className="secondary-button" disabled={!canManageRules || selectedVersion.status !== "draft" || rule.item_type !== "manual"} onClick={() => void stopManualRule(rule)}>
+                      停用人工检查项
                     </button>
                   </li>
                 ))}
@@ -310,7 +395,7 @@ export default function RulesPage() {
                 {groupedRules.auto.map((rule) => (
                   <li key={rule.id}>
                     <button className="link-button" type="button" onClick={() => startEditRule(rule)}>
-                      {rule.rule_code}：{rule.item_name}（{rule.item_type}）
+                      {rule.rule_code}：{rule.item_name}（{rule.item_type} / APQP：{rule.is_apqp ? "是" : "否"} / 状态：{rule.is_active ? "启用" : "停用"} / 排序：{rule.sort_order}）
                     </button>
                   </li>
                 ))}

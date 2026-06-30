@@ -43,6 +43,15 @@ export type ListUsersParams = {
   permission?: string;
 };
 
+export type ListProjectsParams = {
+  keyword?: string;
+  status?: string;
+  qg_node_id?: string;
+  mq_user_id?: string;
+  page?: string;
+  page_size?: string;
+};
+
 export type UserPayload = {
   uid?: string;
   name: string;
@@ -58,6 +67,12 @@ export type Project = {
   project_category?: string | null;
   bu?: string | null;
   project_level?: string | null;
+  mq_user_id?: number | null;
+  mq_user_name_snapshot?: string | null;
+  mp_owner?: string | null;
+  group_name?: string | null;
+  planned_mp_date?: string | null;
+  production_line?: string | null;
   status: string;
   vdrive_url?: string | null;
   vdrive?: {
@@ -67,7 +82,7 @@ export type Project = {
     folder_name?: string | null;
     folder_path?: string | null;
   };
-  orders?: Array<Record<string, unknown>>;
+  orders?: Array<{ id: number; receive_date: string; created_at?: string | null }>;
   models?: Array<{ id: number; model_name: string }>;
 };
 
@@ -93,8 +108,18 @@ export type RuleVersion = {
   status: string;
   change_summary?: string | null;
   published_by?: number | null;
+  published_by_name?: string | null;
   published_at?: string | null;
+  is_current?: boolean;
+  change_details?: RuleChangeDetail[];
   business_check_rules?: BusinessRule[];
+};
+
+export type RuleChangeDetail = {
+  rule_code: string;
+  item_name: string;
+  change_type: string;
+  change_summary?: string | null;
 };
 
 export type BusinessRule = {
@@ -107,6 +132,7 @@ export type BusinessRule = {
   check_type: string;
   checklist_requirement?: string | null;
   owner_dept?: string | null;
+  is_apqp: number;
   is_active: number;
   sort_order: number;
   auto_check_execution_rules?: AutoCheckExecutionRule[];
@@ -357,8 +383,15 @@ export function validateVdriveLink(vdrive_url: string) {
   });
 }
 
-export function listProjects() {
-  return apiRequest<ListResult<Project>>("/api/v1/projects");
+export function listProjects(params: ListProjectsParams = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      search.set(key, value);
+    }
+  }
+  const query = search.toString();
+  return apiRequest<ListResult<Project>>(`/api/v1/projects${query ? `?${query}` : ""}`);
 }
 
 export function createProject(payload: Record<string, unknown>) {
@@ -367,6 +400,14 @@ export function createProject(payload: Record<string, unknown>) {
 
 export function getProject(projectId: number) {
   return apiRequest<Project>(`/api/v1/projects/${projectId}`);
+}
+
+export function updateProject(projectId: number, payload: Record<string, unknown>) {
+  return apiRequest<Project>(`/api/v1/projects/${projectId}`, { method: "PATCH", body: jsonBody(payload) });
+}
+
+export function updateProjectVdrive(projectId: number, payload: { vdrive_url: string }) {
+  return apiRequest<Project>(`/api/v1/projects/${projectId}/vdrive-link`, { method: "POST", body: jsonBody(payload) });
 }
 
 export function addProjectOrder(projectId: number, payload: { receive_date: string; models: string[] }) {

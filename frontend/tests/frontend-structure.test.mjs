@@ -152,6 +152,9 @@ describe("frontend structure", () => {
 
     for (const snippet of [
       "getProject(",
+      "listProjects(params",
+      "updateProject(",
+      "updateProjectVdrive(",
       "updateBusinessRule(",
       "getDashboardOverview(",
       "getDashboardTodos("
@@ -180,6 +183,23 @@ describe("frontend structure", () => {
     }
 
     for (const snippet of [
+      "project_category",
+      "project_level",
+      "mq_user_id",
+      "planned_mp_date",
+      "production_line",
+      "updateProject(",
+      "updateProjectVdrive(",
+      "listFilters",
+      "status: \"normal\"",
+      "接收批次",
+      "保存基础信息",
+      "更新 VDrive"
+    ]) {
+      assert.match(projectsPage, new RegExp(snippet.replaceAll("(", "\\(")), `projects page should contain ${snippet}`);
+    }
+
+    for (const snippet of [
       "getCurrentUser(",
       "canManageRules",
       "updateBusinessRule(",
@@ -189,6 +209,21 @@ describe("frontend structure", () => {
       "人工检查项",
       "版本历史",
       "发布前确认"
+    ]) {
+      assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
+    }
+
+    for (const snippet of [
+      "is_apqp",
+      "sort_order",
+      "is_active",
+      "停用人工检查项",
+      "published_by_name",
+      "is_current",
+      "change_details",
+      "draftChangeDetails",
+      "确认发布规则版本",
+      "当前版本"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }

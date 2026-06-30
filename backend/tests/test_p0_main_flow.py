@@ -227,6 +227,177 @@ class P0MainFlowTest(unittest.TestCase):
         todo_rows = todos.json()["data"]["items"]
         self.assertTrue(any(row["type"] == "running_task" and row["target_id"] == task_id for row in todo_rows))
 
+    def test_project_listing_filters_deleted_models_qg_and_updates_project(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        other_project = self.client.post(
+            "/api/v1/projects",
+            headers=self.headers,
+            json={
+                "project_name": "MQD Other Project",
+                "customer": "Customer B",
+                "vdrive_url": "https://vdrive.example/indrive#/index?id=enterprise_folder-002",
+                "receive_date": "2026-07-01",
+                "models": ["OTHER-MODEL"],
+            },
+        )
+        self.assertEqual(other_project.status_code, 200, other_project.text)
+        other_project_id = other_project.json()["data"]["id"]
+
+        edited = self.client.patch(
+            f"/api/v1/projects/{project_id}",
+            headers=self.headers,
+            json={
+                "customer": "Customer Edited",
+                "project_category": "new_platform",
+                "bu": "BU2",
+                "project_level": "B",
+                "mp_owner": "MP Owner",
+                "group_name": "Group B",
+                "planned_mp_date": "2026-12-01",
+                "production_line": "Line 9",
+            },
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        edited_data = edited.json()["data"]
+        self.assertEqual(edited_data["customer"], "Customer Edited")
+        self.assertEqual(edited_data["bu"], "BU2")
+        self.assertEqual(edited_data["production_line"], "Line 9")
+
+        vdrive = self.client.post(
+            f"/api/v1/projects/{project_id}/vdrive-link",
+            headers=self.headers,
+            json={"vdrive_url": "https://vdrive.example/indrive#/index?folderGuid=updated-folder"},
+        )
+        self.assertEqual(vdrive.status_code, 200, vdrive.text)
+        self.assertEqual(vdrive.json()["data"]["vdrive"]["folder_guid"], "updated-folder")
+        self.assertEqual(vdrive.json()["data"]["vdrive"]["folder_path"], "/mock/updated-folder")
+
+        by_model = self.client.get("/api/v1/projects?keyword=M2", headers=self.headers)
+        self.assertEqual(by_model.status_code, 200, by_model.text)
+        self.assertEqual([row["id"] for row in by_model.json()["data"]["items"]], [project_id])
+
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "PROJECT_FILTER_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+
+        by_qg = self.client.get("/api/v1/projects?qg_node_id=1", headers=self.headers)
+        self.assertEqual(by_qg.status_code, 200, by_qg.text)
+        self.assertEqual([row["id"] for row in by_qg.json()["data"]["items"]], [project_id])
+
+        deleted = self.client.request(
+            "DELETE",
+            f"/api/v1/projects/{other_project_id}",
+            headers=self.headers,
+            json={"confirm_project_name": "MQD Other Project", "delete_reason": "test deleted filter"},
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        deleted_list = self.client.get("/api/v1/projects?status=deleted", headers=self.headers)
+        self.assertEqual(deleted_list.status_code, 200, deleted_list.text)
+        self.assertEqual([row["id"] for row in deleted_list.json()["data"]["items"]], [other_project_id])
+
+    def test_add_order_is_blocked_when_project_has_active_task(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "ORDER_BLOCK_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+
+        order = self.client.post(
+            f"/api/v1/projects/{project_id}/orders",
+            headers=self.headers,
+            json={"receive_date": "2026-08-01", "models": ["M3"]},
+        )
+        self.assertEqual(order.status_code, 400)
+        self.assertEqual(order.json()["error"]["code"], "PROJECT_HAS_ACTIVE_TASK")
+
+    def test_rule_version_history_includes_current_marker_publisher_and_change_details(self):
+        version = self.client.post(
+            "/api/v1/business-rule-versions",
+            headers=self.headers,
+            json={"qg_node_id": 1, "version_no": "V-HISTORY", "change_summary": "history fields"},
+        )
+        self.assertEqual(version.status_code, 200, version.text)
+        version_id = version.json()["data"]["id"]
+        manual_rule = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "rule_code": "HISTORY_MANUAL",
+                "item_name": "History manual item",
+                "item_type": "manual",
+                "check_type": "manual",
+                "checklist_requirement": "Initial requirement",
+                "owner_dept": "MQD",
+                "is_apqp": False,
+                "is_active": True,
+                "sort_order": 1,
+            },
+        )
+        self.assertEqual(manual_rule.status_code, 200, manual_rule.text)
+        rule_id = manual_rule.json()["data"]["id"]
+        edited_rule = self.client.patch(
+            f"/api/v1/business-check-rules/{rule_id}",
+            headers=self.headers,
+            json={
+                "item_name": "History manual item edited",
+                "checklist_requirement": "Edited requirement",
+                "is_apqp": True,
+                "is_active": False,
+                "sort_order": 3,
+            },
+        )
+        self.assertEqual(edited_rule.status_code, 200, edited_rule.text)
+
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+        published_data = published.json()["data"]
+        self.assertEqual(published_data["published_by_name"], "系统管理员")
+        self.assertTrue(published_data["is_current"])
+        self.assertEqual(published_data["change_details"][0]["rule_code"], "HISTORY_MANUAL")
+        self.assertEqual(published_data["change_details"][0]["change_type"], "disabled")
+
+        versions = self.client.get("/api/v1/business-rule-versions?qg_node_id=1", headers=self.headers)
+        self.assertEqual(versions.status_code, 200, versions.text)
+        history_version = next(row for row in versions.json()["data"]["items"] if row["id"] == version_id)
+        self.assertEqual(history_version["published_by_name"], "系统管理员")
+        self.assertTrue(history_version["is_current"])
+        self.assertEqual(history_version["change_details"][0]["item_name"], "History manual item edited")
+
     def test_task_creation_rolls_back_when_later_step_fails(self):
         from app.core.database import query_all
 

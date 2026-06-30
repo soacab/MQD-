@@ -437,21 +437,43 @@ def validate_vdrive_link(payload: dict = Body(...), _: dict = Depends(current_us
 @app.get("/api/v1/projects")
 def list_projects(
     keyword: str | None = None,
+    qg_node_id: int | None = None,
     status: str | None = None,
+    mq_user_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
     user: dict = Depends(current_user),
 ) -> dict[str, Any]:
     require_business_scope(user)
     rows = query_all("SELECT * FROM projects ORDER BY id DESC")
-    rows = [row for row in rows if row["status"] != ProjectStatus.DELETED]
+    selected_status = status or ProjectStatus.NORMAL
+    if selected_status == ProjectStatus.DELETED and not has_full_business_scope(user):
+        raise BusinessError("FORBIDDEN", "deleted 项目仅项目管理员可查询", 403)
     if not has_full_business_scope(user):
         rows = [row for row in rows if project_in_business_scope(row["id"], user)]
-    selected_status = status or ProjectStatus.NORMAL
     rows = [row for row in rows if row["status"] == selected_status]
+    if qg_node_id:
+        project_ids = {
+            row["project_id"]
+            for row in query_all("SELECT DISTINCT project_id FROM inspection_tasks WHERE qg_node_id = ?", (qg_node_id,))
+        }
+        rows = [row for row in rows if row["id"] in project_ids]
+    if mq_user_id:
+        rows = [row for row in rows if row["mq_user_id"] == mq_user_id]
     if keyword:
-        rows = [row for row in rows if keyword in row["project_name"] or keyword in row["customer"]]
+        rows = [row for row in rows if project_matches_keyword(row, keyword)]
     return ok(paginate([project_detail(row) for row in rows], page, page_size))
+
+
+def project_matches_keyword(project: dict[str, Any], keyword: str) -> bool:
+    if keyword in project["project_name"] or keyword in project["customer"]:
+        return True
+    return bool(
+        query_one(
+            "SELECT id FROM project_models WHERE project_id = ? AND model_name LIKE ? LIMIT 1",
+            (project["id"], f"%{keyword}%"),
+        )
+    )
 
 
 def project_detail(project: dict[str, Any]) -> dict[str, Any]:
@@ -575,6 +597,12 @@ def add_project_order(project_id: int, payload: dict = Body(...), user: dict = D
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
     if project["status"] != ProjectStatus.NORMAL:
         raise BusinessError("PROJECT_DELETED", "已删除项目不能加单")
+    active_task = query_one(
+        "SELECT id FROM inspection_tasks WHERE project_id = ? AND status IN (?, ?) LIMIT 1",
+        (project_id, InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING),
+    )
+    if active_task:
+        raise BusinessError("PROJECT_HAS_ACTIVE_TASK", "项目存在进行中或整改中任务，不能加单")
     order_id = add_project_order_rows(project_id, payload["receive_date"], payload.get("models", []), user["id"])
     audit("add_project_order", "project", project_id, user["id"], payload)
     return ok({"id": order_id})
@@ -603,6 +631,43 @@ def list_qg_nodes(user: dict = Depends(current_user)) -> dict[str, Any]:
     return ok({"items": query_all("SELECT * FROM qg_nodes WHERE is_active = 1 ORDER BY sort_order")})
 
 
+def serialize_rule_version(version: dict[str, Any]) -> dict[str, Any]:
+    publisher = query_one("SELECT name FROM users WHERE id = ?", (version.get("published_by"),))
+    current = query_one(
+        """
+        SELECT id FROM business_rule_versions
+        WHERE qg_node_id = ? AND status = ?
+        ORDER BY published_at DESC, id DESC LIMIT 1
+        """,
+        (version["qg_node_id"], RuleVersionStatus.PUBLISHED),
+    )
+    return {
+        **version,
+        "published_by_name": publisher["name"] if publisher else None,
+        "is_current": bool(
+            version["status"] == RuleVersionStatus.PUBLISHED
+            and current
+            and current["id"] == version["id"]
+        ),
+        "change_details": rule_version_change_details(version["id"]),
+    }
+
+
+def rule_version_change_details(version_id: int) -> list[dict[str, Any]]:
+    rules = query_all("SELECT * FROM business_check_rules WHERE business_rule_version_id = ? ORDER BY sort_order, id", (version_id,))
+    details = []
+    for rule in rules:
+        details.append(
+            {
+                "rule_code": rule["rule_code"],
+                "item_name": rule["item_name"],
+                "change_type": "disabled" if not rule["is_active"] else "added",
+                "change_summary": "停用检查项" if not rule["is_active"] else "新增或保留检查项",
+            }
+        )
+    return details
+
+
 @app.get("/api/v1/business-rule-versions")
 def list_rule_versions(qg_node_id: int | None = None, status: str | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_rule_read_permissions(user)
@@ -611,7 +676,7 @@ def list_rule_versions(qg_node_id: int | None = None, status: str | None = None,
         rows = [row for row in rows if row["qg_node_id"] == qg_node_id]
     if status:
         rows = [row for row in rows if row["status"] == status]
-    return ok({"items": rows})
+    return ok({"items": [serialize_rule_version(row) for row in rows]})
 
 
 @app.post("/api/v1/business-rule-versions")
@@ -622,7 +687,7 @@ def create_rule_version(payload: dict = Body(...), user: dict = Depends(current_
         (payload["qg_node_id"], payload["version_no"], payload.get("change_summary"), user["id"]),
     )
     audit("create_rule_version", "business_rule_version", cur.lastrowid, user["id"], payload)
-    return ok(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (cur.lastrowid,)))
+    return ok(serialize_rule_version(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (cur.lastrowid,))))
 
 
 @app.get("/api/v1/business-rule-versions/{version_id}")
@@ -635,8 +700,9 @@ def get_rule_version(version_id: int, user: dict = Depends(current_user)) -> dic
             "SELECT * FROM auto_check_execution_rules WHERE business_check_rule_id = ? ORDER BY id",
             (rule["id"],),
         )
-    version["business_check_rules"] = rules
-    return ok(version)
+    detail = serialize_rule_version(version)
+    detail["business_check_rules"] = rules
+    return ok(detail)
 
 
 @app.post("/api/v1/business-rule-versions/{version_id}/business-check-rules")
@@ -766,7 +832,7 @@ def publish_rule_version(version_id: int, user: dict = Depends(current_user)) ->
             (RuleVersionStatus.PUBLISHED, user["id"], version_id),
         )
         audit("publish_rule_version", "business_rule_version", version_id, user["id"])
-    return ok(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,)))
+    return ok(serialize_rule_version(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,))))
 
 
 def ensure_rule_version_draft_for_rule(rule_id: int) -> dict[str, Any]:
@@ -793,7 +859,7 @@ def deprecate_rule_version(version_id: int, user: dict = Depends(current_user)) 
     require_permissions(user, {Permission.RULES_ADMIN})
     execute("UPDATE business_rule_versions SET status = ? WHERE id = ?", (RuleVersionStatus.DEPRECATED, version_id))
     audit("deprecate_rule_version", "business_rule_version", version_id, user["id"])
-    return ok(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,)))
+    return ok(serialize_rule_version(query_one("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,))))
 
 
 def build_rule_snapshots(version_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
