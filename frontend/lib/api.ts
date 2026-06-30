@@ -37,6 +37,20 @@ export type LoginResult = {
   user: User;
 };
 
+export type ListUsersParams = {
+  keyword?: string;
+  status?: string;
+  permission?: string;
+};
+
+export type UserPayload = {
+  uid?: string;
+  name: string;
+  email?: string;
+  status: string;
+  permissions: string[];
+};
+
 export type Project = {
   id: number;
   project_name: string;
@@ -263,12 +277,42 @@ export function getCurrentUser() {
   return apiRequest<User>("/api/v1/auth/me");
 }
 
-export function listUsers() {
-  return apiRequest<ListResult<User>>("/api/v1/users");
+export function listUsers(params: ListUsersParams = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      search.set(key, value);
+    }
+  }
+  const query = search.toString();
+  return apiRequest<ListResult<User>>(`/api/v1/users${query ? `?${query}` : ""}`);
 }
 
-export function createUser(payload: { uid: string; name: string; email?: string; permissions: string[] }) {
+export function createUser(payload: UserPayload & { uid: string }) {
   return apiRequest<User>("/api/v1/users", { method: "POST", body: jsonBody(payload) });
+}
+
+export function updateUser(userId: number, payload: UserPayload) {
+  return apiRequest<User>(`/api/v1/users/${userId}`, { method: "PUT", body: jsonBody(payload) });
+}
+
+export function updateUserPermissions(userId: number, permissions: string[]) {
+  return apiRequest<User>(`/api/v1/users/${userId}/permissions`, {
+    method: "PUT",
+    body: jsonBody({ permissions })
+  });
+}
+
+export function enableUser(userId: number) {
+  return apiRequest<User>(`/api/v1/users/${userId}/enable`, { method: "POST" });
+}
+
+export function disableUser(userId: number) {
+  return apiRequest<User>(`/api/v1/users/${userId}/disable`, { method: "POST" });
+}
+
+export function deleteUser(userId: number) {
+  return apiRequest<User>(`/api/v1/users/${userId}`, { method: "DELETE" });
 }
 
 export function getSystemSettings() {

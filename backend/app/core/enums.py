@@ -11,6 +11,7 @@ class Permission(StrEnum):
 class UserStatus(StrEnum):
     ACTIVE = "active"
     DISABLED = "disabled"
+    DELETED = "deleted"
 
 
 class ProjectStatus(StrEnum):

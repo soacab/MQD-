@@ -200,10 +200,26 @@ nav a:hover {
   gap: 8px;
 }
 
+.checkbox-group {
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.checkbox-group legend {
+  padding: 0 4px;
+  color: #4d5663;
+  font-size: 14px;
+}
+
 .form-panel input,
 .form-panel select,
 .form-panel textarea,
-.inline-form input {
+.inline-form input,
+.filters input,
+.filters select {
   width: 100%;
   min-height: 38px;
   border: 1px solid #cfd6df;
@@ -222,7 +238,8 @@ nav a:hover {
 .form-panel button,
 .module button,
 .secondary-button,
-.inline-form button {
+.inline-form button,
+.danger-button {
   min-height: 38px;
   border: 0;
   border-radius: 6px;
@@ -256,6 +273,16 @@ nav a:hover {
   background: #dfe7f1;
 }
 
+.danger-button {
+  background: #fbebeb;
+  color: #ab2b2b;
+  border: 1px solid #efb4b4;
+}
+
+.danger-button:hover {
+  background: #f6d7d7;
+}
+
 .button-row,
 .inline-form {
   display: flex;
@@ -284,6 +311,50 @@ nav a:hover {
 
 .spaced {
   margin-top: 16px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.section-heading h2,
+.section-heading p {
+  margin: 0;
+}
+
+.section-heading p {
+  color: #687486;
+  font-size: 14px;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 140px 140px;
+  gap: 10px;
+  width: min(560px, 100%);
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.permission-grid div {
+  border: 1px solid #e0e4ea;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.permission-grid p {
+  margin: 6px 0 0;
+  color: #5b6472;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .stack {

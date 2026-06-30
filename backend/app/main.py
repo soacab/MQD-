@@ -68,6 +68,17 @@ def permissions_for_user(user_id: int) -> list[str]:
     return [row["permission_code"] for row in rows]
 
 
+def normalize_permissions(raw_permissions: list[str] | None) -> list[str]:
+    permissions = []
+    valid_permissions = {permission.value for permission in Permission}
+    for permission in raw_permissions or []:
+        if permission not in valid_permissions:
+            raise BusinessError("INVALID_PERMISSION", f"未知权限 {permission}")
+        if permission not in permissions:
+            permissions.append(permission)
+    return permissions
+
+
 def serialize_user(user: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": user["id"],
@@ -99,10 +110,51 @@ def current_user(authorization: str = Header(default="")) -> dict[str, Any]:
 
 def require_permissions(user: dict[str, Any], allowed: set[str]) -> None:
     user_permissions = set(permissions_for_user(user["id"]))
-    if Permission.SUPER_ADMIN in user_permissions:
-        return
     if not user_permissions.intersection(allowed):
         raise BusinessError("FORBIDDEN", "权限不足", 403)
+
+
+def require_editable_user(user_id: int) -> dict[str, Any]:
+    return row_or_404(
+        "SELECT * FROM users WHERE id = ? AND status != ?",
+        (user_id, UserStatus.DELETED),
+        "USER_NOT_FOUND",
+        "用户不存在",
+    )
+
+
+def ensure_not_current_user(target_user_id: int, actor_user_id: int, message: str) -> None:
+    if target_user_id == actor_user_id:
+        raise BusinessError("CURRENT_USER_PROTECTED", message)
+
+
+def ensure_permission_admin_remains(
+    target_user_id: int,
+    target_status: str | None = None,
+    target_permissions: list[str] | None = None,
+) -> None:
+    target = require_editable_user(target_user_id)
+    next_status = target_status or target["status"]
+    next_permissions = set(target_permissions if target_permissions is not None else permissions_for_user(target_user_id))
+    if next_status == UserStatus.ACTIVE and Permission.SUPER_ADMIN in next_permissions:
+        return
+
+    rows = query_all(
+        """
+        SELECT u.id FROM users u
+        JOIN user_permissions p ON p.user_id = u.id
+        WHERE u.status = ? AND p.permission_code = ? AND u.id != ?
+        """,
+        (UserStatus.ACTIVE, Permission.SUPER_ADMIN, target_user_id),
+    )
+    if not rows:
+        raise BusinessError("LAST_PERMISSION_ADMIN", "系统需保留至少一个权限管理员")
+
+
+def replace_user_permissions(target_user_id: int, permissions: list[str]) -> None:
+    execute("DELETE FROM user_permissions WHERE user_id = ?", (target_user_id,))
+    for permission in permissions:
+        execute("INSERT INTO user_permissions(user_id, permission_code) VALUES (?, ?)", (target_user_id, permission))
 
 
 def parse_vdrive_url(url: str) -> dict[str, Any]:
@@ -154,59 +206,87 @@ def me(user: dict = Depends(current_user)) -> dict[str, Any]:
 def list_users(
     keyword: str | None = None,
     status: str | None = None,
+    permission: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
     user: dict = Depends(current_user),
 ) -> dict[str, Any]:
-    require_permissions(user, {Permission.SUPER_ADMIN})
     rows = query_all("SELECT * FROM users ORDER BY id")
+    if status:
+        if status not in {status.value for status in UserStatus}:
+            raise BusinessError("INVALID_USER_STATUS", f"未知用户状态 {status}")
+    else:
+        rows = [r for r in rows if r["status"] != UserStatus.DELETED]
     if keyword:
         rows = [r for r in rows if keyword in r["uid"] or keyword in r["name"] or keyword in (r["email"] or "")]
     if status:
         rows = [r for r in rows if r["status"] == status]
-    return ok({"items": [serialize_user(row) for row in rows]})
+    if permission:
+        if permission not in {item.value for item in Permission}:
+            raise BusinessError("INVALID_PERMISSION", f"未知权限 {permission}")
+        rows = [r for r in rows if permission in permissions_for_user(r["id"])]
+    return ok(paginate([serialize_user(row) for row in rows], page, page_size))
 
 
 @app.post("/api/v1/users")
 def create_user(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.SUPER_ADMIN})
+    status = payload.get("status", UserStatus.ACTIVE)
+    if status not in {UserStatus.ACTIVE, UserStatus.DISABLED}:
+        raise BusinessError("INVALID_USER_STATUS", "新增账号状态只能为启用或停用")
+    permissions = normalize_permissions(payload.get("permissions", []))
     cur = execute(
         "INSERT INTO users(uid, name, email, status) VALUES (?, ?, ?, ?)",
-        (payload["uid"], payload["name"], payload.get("email"), UserStatus.ACTIVE),
+        (payload["uid"], payload["name"], payload.get("email"), status),
     )
     user_id = cur.lastrowid
-    for permission in payload.get("permissions", []):
-        execute("INSERT INTO user_permissions(user_id, permission_code) VALUES (?, ?)", (user_id, permission))
+    replace_user_permissions(user_id, permissions)
     audit("create_user", "user", user_id, user["id"], payload)
+    return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
+
+
+@app.put("/api/v1/users/{user_id}")
+def update_user(user_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_permissions(user, {Permission.SUPER_ADMIN})
+    require_editable_user(user_id)
+    status = payload.get("status", UserStatus.ACTIVE)
+    if status not in {UserStatus.ACTIVE, UserStatus.DISABLED}:
+        raise BusinessError("INVALID_USER_STATUS", "账号状态只能为启用或停用")
+    permissions = normalize_permissions(payload.get("permissions", []))
+    if user_id == user["id"] and Permission.SUPER_ADMIN not in permissions:
+        raise BusinessError("CURRENT_PERMISSION_ADMIN_PROTECTED", "不能取消自己的权限管理权限")
+    if user_id == user["id"] and status != UserStatus.ACTIVE:
+        raise BusinessError("CURRENT_USER_PROTECTED", "不能停用当前登录账号")
+    ensure_permission_admin_remains(user_id, status, permissions)
+    with transaction():
+        execute(
+            "UPDATE users SET name = ?, email = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (payload["name"], payload.get("email"), status, user_id),
+        )
+        replace_user_permissions(user_id, permissions)
+        audit("update_user", "user", user_id, user["id"], payload)
     return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
 
 
 @app.put("/api/v1/users/{user_id}/permissions")
 def update_user_permissions(user_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.SUPER_ADMIN})
-    row_or_404("SELECT * FROM users WHERE id = ?", (user_id,), "USER_NOT_FOUND", "用户不存在")
-    execute("DELETE FROM user_permissions WHERE user_id = ?", (user_id,))
-    for permission in payload.get("permissions", []):
-        execute("INSERT INTO user_permissions(user_id, permission_code) VALUES (?, ?)", (user_id, permission))
+    require_editable_user(user_id)
+    permissions = normalize_permissions(payload.get("permissions", []))
+    if user_id == user["id"] and Permission.SUPER_ADMIN not in permissions:
+        raise BusinessError("CURRENT_PERMISSION_ADMIN_PROTECTED", "不能取消自己的权限管理权限")
+    ensure_permission_admin_remains(user_id, target_permissions=permissions)
+    replace_user_permissions(user_id, permissions)
     audit("update_user_permissions", "user", user_id, user["id"], payload)
     return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
-
-
-def ensure_not_last_super_admin(target_user_id: int) -> None:
-    rows = query_all(
-        """
-        SELECT u.id FROM users u
-        JOIN user_permissions p ON p.user_id = u.id
-        WHERE u.status = ? AND p.permission_code = ?
-        """,
-        (UserStatus.ACTIVE, Permission.SUPER_ADMIN),
-    )
-    if len(rows) <= 1 and rows and rows[0]["id"] == target_user_id:
-        raise BusinessError("LAST_SUPER_ADMIN", "不能停用或删除最后一个权限管理员")
 
 
 @app.post("/api/v1/users/{user_id}/disable")
 def disable_user(user_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.SUPER_ADMIN})
-    ensure_not_last_super_admin(user_id)
+    require_editable_user(user_id)
+    ensure_not_current_user(user_id, user["id"], "不能停用当前登录账号")
+    ensure_permission_admin_remains(user_id, target_status=UserStatus.DISABLED)
     execute("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (UserStatus.DISABLED, user_id))
     audit("disable_user", "user", user_id, user["id"])
     return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
@@ -215,8 +295,20 @@ def disable_user(user_id: int, user: dict = Depends(current_user)) -> dict[str, 
 @app.post("/api/v1/users/{user_id}/enable")
 def enable_user(user_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.SUPER_ADMIN})
+    require_editable_user(user_id)
     execute("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (UserStatus.ACTIVE, user_id))
     audit("enable_user", "user", user_id, user["id"])
+    return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
+
+
+@app.delete("/api/v1/users/{user_id}")
+def delete_user(user_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_permissions(user, {Permission.SUPER_ADMIN})
+    require_editable_user(user_id)
+    ensure_not_current_user(user_id, user["id"], "不能删除当前登录账号")
+    ensure_permission_admin_remains(user_id, target_status=UserStatus.DELETED)
+    execute("UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (UserStatus.DELETED, user_id))
+    audit("delete_user", "user", user_id, user["id"])
     return ok(serialize_user(query_one("SELECT * FROM users WHERE id = ?", (user_id,))))
 
 

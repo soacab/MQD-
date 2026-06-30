@@ -74,7 +74,17 @@ describe("frontend structure", () => {
   it("turns P0 workflow pages into API-backed client pages", () => {
     const pageExpectations = {
       "app/login/page.tsx": ["use client", "login(", "saveSession"],
-      "app/admin/page.tsx": ["use client", "listUsers(", "createUser(", "saveSystemSetting("],
+      "app/admin/page.tsx": [
+        "use client",
+        "listUsers(",
+        "createUser(",
+        "updateUser(",
+        "deleteUser(",
+        "权限管理",
+        "只读模式",
+        "确认删除 UID",
+        "type=\"checkbox\""
+      ],
       "app/projects/page.tsx": ["use client", "listProjects(", "createProject(", "validateVdriveLink("],
       "app/rules/page.tsx": ["use client", "listQGNodes(", "createRuleVersion(", "publishRuleVersion("],
       "app/inspection/page.tsx": ["use client", "createInspectionTask(", "confirmInspectionItem(", "archiveCurrentRound("],
@@ -87,6 +97,21 @@ describe("frontend structure", () => {
       for (const snippet of expectedSnippets) {
         assert.match(source, new RegExp(snippet.replaceAll("(", "\\(")), `${page} should contain ${snippet}`);
       }
+    }
+  });
+
+  it("exposes account permission administration API helpers", () => {
+    const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
+
+    for (const snippet of [
+      "permission?: string",
+      "updateUser(",
+      "updateUserPermissions(",
+      "enableUser(",
+      "disableUser(",
+      "deleteUser("
+    ]) {
+      assert.match(api, new RegExp(snippet.replaceAll("(", "\\(").replaceAll("?", "\\?")), `api should contain ${snippet}`);
     }
   });
 });
