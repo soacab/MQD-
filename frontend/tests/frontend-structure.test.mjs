@@ -99,7 +99,7 @@ describe("frontend structure", () => {
         "用户与权限 / 系统设置",
         "type=\"checkbox\""
       ],
-      "app/projects/page.tsx": ["use client", "listProjects(", "createProject(", "validateVdriveLink("],
+      "app/projects/page.tsx": ["use client", "listProjects(", "updateProject(", "updateProjectVdrive(", "addProjectOrder(", "deleteProject("],
       "app/rules/page.tsx": ["use client", "listQGNodes(", "prepareEditableRuleVersion(", "publishRuleVersion("],
       "app/inspection/page.tsx": ["use client", "prepareInspectionTask(", "listBusinessUserOptions(", "createInspectionTask(", "confirmInspectionItem(", "archiveCurrentRound("],
       "app/reports/page.tsx": ["use client", "listArchiveProjects(", "listBusinessUserOptions(", "getProject(", "addProjectOrder("],
@@ -247,6 +247,26 @@ describe("frontend structure", () => {
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
+  });
+
+  it("keeps task creation as the only user-facing creation entry", () => {
+    const homePage = readFileSync(resolve(root, "app/page.tsx"), "utf8");
+    const projectsPage = readFileSync(resolve(root, "app/projects/page.tsx"), "utf8");
+    const inspectionPage = readFileSync(resolve(root, "app/inspection/page.tsx"), "utf8");
+
+    assert.doesNotMatch(homePage, /项目创建/, "home page should not advertise project creation");
+    assert.match(homePage, /项目档案/, "home page may expose project archives");
+    assert.match(homePage, /新建点检任务/, "home page should guide users to task creation");
+
+    assert.doesNotMatch(projectsPage, /createProject\(/, "project archive page should not call project creation from the UI");
+    assert.doesNotMatch(projectsPage, /handleCreate/, "project archive page should not keep a create-project submit flow");
+    assert.doesNotMatch(projectsPage, /创建项目/, "project archive page should not show create-project copy");
+    assert.match(projectsPage, /项目档案维护/, "project page should be framed as archive maintenance");
+
+    assert.match(inspectionPage, /新建点检任务/, "inspection page should name the only creation flow");
+    assert.match(inspectionPage, /关联项目基础信息/, "inspection page should frame project fields as linked task context");
+    assert.match(inspectionPage, /VDrive 扫描、文件内容解析、QMS\/UCM 直连仍为 mock 或未接入真实接口/, "inspection page should disclose external integration limits");
+    assert.doesNotMatch(inspectionPage, /<h2>新建检查任务<\/h2>/, "inspection page should not use inconsistent task naming");
   });
 
   it("aligns reports page with the inspection archive project list", () => {

@@ -155,7 +155,7 @@ export default function InspectionPage() {
       return "请补齐项目名称、客户、项目接收时间和 QG 节点。";
     }
     if (!taskForm.project_category || !taskForm.bu || !taskForm.project_level || !taskForm.mq_user_id || !taskForm.mp_owner || !taskForm.group_name || !taskForm.production_line) {
-      return "请补齐项目基础信息。";
+      return "请补齐关联项目基础信息。";
     }
     if (!cleanModels.length) {
       return "至少填写 1 个机型。";
@@ -308,11 +308,14 @@ export default function InspectionPage() {
         <h1>点检执行</h1>
       </header>
       {message ? <p className="notice">{message}</p> : null}
+      <p className="notice">
+        当前页面已接入本系统任务、检查项、工程师确认、归档和报告接口；VDrive 扫描、文件内容解析、QMS/UCM 直连仍为 mock 或未接入真实接口，不作为真实点检有效性结论。
+      </p>
       <section className="summary">
         <div>
           <span>1</span>
-          <strong>创建任务</strong>
-          <p>粘贴 VDrive 链接，确认项目信息和 QG 节点。</p>
+          <strong>新建点检任务</strong>
+          <p>粘贴 VDrive 链接，确认关联项目基础信息和 QG 节点。</p>
         </div>
         <div>
           <span>2</span>
@@ -334,7 +337,7 @@ export default function InspectionPage() {
         <section className="form-panel wizard-panel">
           <div className="section-heading">
             <div>
-              <h2>新建检查任务</h2>
+              <h2>新建点检任务</h2>
               <p>第 {wizardStep === "edit" ? "1" : "2"} 步 / 共 2 步</p>
             </div>
           </div>
@@ -363,7 +366,7 @@ export default function InspectionPage() {
                   已识别：{prepareResult.vdrive.folder_path}；{prepareResult.has_history ? "已找到历史记录" : "未找到历史记录"}
                 </p>
               ) : null}
-              <div className="form-divider">项目基础信息</div>
+              <div className="form-divider">关联项目基础信息</div>
               <label className="wide-field">
                 项目名称 <span className="required">*</span>
                 <input name="project_name" value={taskForm.project_name} onChange={(event) => setTaskForm({ ...taskForm, project_name: event.target.value })} required />

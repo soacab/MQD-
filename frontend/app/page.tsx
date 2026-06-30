@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { fetchHealth, getDashboardOverview, getDashboardTodos, type DashboardOverview, type DashboardTodo } from "@/lib/api";
 
 const modules = [
-  ["项目", "项目创建、VDrive 链接、加单、软删除", "/projects"],
+  ["项目档案", "历史项目基础信息、加单、软删除", "/projects"],
   ["规则", "QG 节点、规则版本、检查项、执行规则发布", "/rules"],
-  ["点检", "任务创建、规则快照、首轮检查项、工程师确认", "/inspection"],
+  ["点检", "新建点检任务、规则快照、首轮检查项、工程师确认", "/inspection"],
   ["报告", "FULL_GO / C_GO / NO_GO 结论、报告和过程记录", "/reports"],
   ["整改", "整改项、待跟进项、复查轮次", "/rectification"],
   ["后台", "账号权限、系统设置、审计日志", "/admin"]

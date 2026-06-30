@@ -3,15 +3,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   addProjectOrder,
-  createProject,
   deleteProject,
   getProject,
   listProjects,
   updateProject,
   updateProjectVdrive,
-  validateVdriveLink,
-  type Project,
-  type VDriveValidation
+  type Project
 } from "@/lib/api";
 
 const emptyProjectForm = {
@@ -46,10 +43,8 @@ const editableProjectFields = [
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [vdriveResult, setVdriveResult] = useState<VDriveValidation | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [message, setMessage] = useState("");
-  const [form, setForm] = useState(emptyProjectForm);
   const [editForm, setEditForm] = useState(emptyProjectForm);
   const [editVdriveUrl, setEditVdriveUrl] = useState("");
   const [listFilters, setListFilters] = useState({ keyword: "", status: "normal", qg_node_id: "", mq_user_id: "" });
@@ -99,38 +94,6 @@ export default function ProjectsPage() {
       production_line: project.production_line || ""
     });
     setEditVdriveUrl(project.vdrive?.url || project.vdrive_url || "");
-  }
-
-  async function handleValidate() {
-    try {
-      const result = await validateVdriveLink(form.vdrive_url);
-      setVdriveResult(result);
-      setMessage("VDrive 链接校验通过。");
-    } catch (error) {
-      setVdriveResult(null);
-      setMessage(error instanceof Error ? error.message : "VDrive 校验失败");
-    }
-  }
-
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      await createProject({
-        ...buildProjectPayload(form),
-        vdrive_url: form.vdrive_url,
-        receive_date: form.receive_date,
-        models: form.models
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean)
-      });
-      setForm(emptyProjectForm);
-      setVdriveResult(null);
-      setMessage("项目已创建。");
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建项目失败");
-    }
   }
 
   async function handleFilter(event: FormEvent<HTMLFormElement>) {
@@ -226,79 +189,12 @@ export default function ProjectsPage() {
   return (
     <main className="page">
       <header className="page-header">
-        <p className="eyebrow">项目</p>
-        <h1>项目管理</h1>
+        <p className="eyebrow">项目档案</p>
+        <h1>项目档案维护</h1>
+        <p>项目档案由新建点检任务时自动创建或复用；本页仅用于历史基础信息维护、加单和作废。</p>
       </header>
       {message ? <p className="notice">{message}</p> : null}
-      <section className="two-column">
-        <form className="form-panel" onSubmit={handleCreate}>
-          <h2>创建项目</h2>
-          <label>
-            项目名称
-            <input name="project_name" value={form.project_name} onChange={(event) => setForm({ ...form, project_name: event.target.value })} required />
-          </label>
-          <label>
-            客户
-            <input name="customer" value={form.customer} onChange={(event) => setForm({ ...form, customer: event.target.value })} required />
-          </label>
-          <label>
-            项目类别
-            <input name="project_category" value={form.project_category} onChange={(event) => setForm({ ...form, project_category: event.target.value })} />
-          </label>
-          <label>
-            BU
-            <input name="bu" value={form.bu} onChange={(event) => setForm({ ...form, bu: event.target.value })} />
-          </label>
-          <label>
-            项目等级
-            <input name="project_level" value={form.project_level} onChange={(event) => setForm({ ...form, project_level: event.target.value })} />
-          </label>
-          <label>
-            MQ 人员 ID
-            <input name="mq_user_id" value={form.mq_user_id} onChange={(event) => setForm({ ...form, mq_user_id: event.target.value })} />
-          </label>
-          <label>
-            对应 MP
-            <input name="mp_owner" value={form.mp_owner} onChange={(event) => setForm({ ...form, mp_owner: event.target.value })} />
-          </label>
-          <label>
-            小组
-            <input name="group_name" value={form.group_name} onChange={(event) => setForm({ ...form, group_name: event.target.value })} />
-          </label>
-          <label>
-            计划量产时间
-            <input name="planned_mp_date" type="date" value={form.planned_mp_date} onChange={(event) => setForm({ ...form, planned_mp_date: event.target.value })} />
-          </label>
-          <label>
-            生产线体
-            <input name="production_line" value={form.production_line} onChange={(event) => setForm({ ...form, production_line: event.target.value })} />
-          </label>
-          <label>
-            VDrive 链接
-            <input
-              name="vdrive_url"
-              value={form.vdrive_url}
-              onChange={(event) => setForm({ ...form, vdrive_url: event.target.value })}
-              placeholder="https://vdrive.example/folderGuid=demo"
-              required
-            />
-          </label>
-          <label>
-            接收日期
-            <input name="receive_date" type="date" value={form.receive_date} onChange={(event) => setForm({ ...form, receive_date: event.target.value })} required />
-          </label>
-          <label>
-            机型（逗号分隔）
-            <input name="models" value={form.models} onChange={(event) => setForm({ ...form, models: event.target.value })} />
-          </label>
-          <div className="button-row">
-            <button type="button" onClick={handleValidate}>
-              校验路径
-            </button>
-            <button type="submit">创建项目</button>
-          </div>
-          {vdriveResult ? <p className="notice">已识别：{vdriveResult.folder_path}</p> : null}
-        </form>
+      <section className="spaced">
         <section className="module">
           <h2>项目列表</h2>
           <form className="inline-form" onSubmit={handleFilter}>
