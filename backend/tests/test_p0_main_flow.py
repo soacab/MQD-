@@ -345,6 +345,105 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(order.status_code, 400)
         self.assertEqual(order.json()["error"]["code"], "PROJECT_HAS_ACTIVE_TASK")
 
+    def test_add_order_requires_at_least_one_model(self):
+        project_id, _, _ = self._create_project_and_rules()
+
+        order = self.client.post(
+            f"/api/v1/projects/{project_id}/orders",
+            headers=self.headers,
+            json={"receive_date": "2026-07-20", "models": ["", "   "]},
+        )
+
+        self.assertEqual(order.status_code, 400)
+        self.assertEqual(order.json()["error"]["code"], "PROJECT_ORDER_MODEL_REQUIRED")
+
+    def test_archive_projects_lists_latest_report_rows_and_filters(self):
+        from app.core.database import execute
+
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        other_project = self.client.post(
+            "/api/v1/projects",
+            headers=self.headers,
+            json={
+                "project_name": "Archive Hidden Draft",
+                "customer": "Customer B",
+                "vdrive_url": "https://vdrive.example/indrive#/index?folderGuid=archive-hidden",
+                "receive_date": "2026-07-01",
+                "models": ["HIDDEN-MODEL"],
+            },
+        )
+        self.assertEqual(other_project.status_code, 200, other_project.text)
+
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "ARCHIVE_PROJECT_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+        task_id = task.json()["data"]["inspection_task_id"]
+        execute(
+            """
+            UPDATE inspection_reports
+            SET overall_result = ?, last_modified_at = ?
+            WHERE inspection_task_id = ?
+            """,
+            ("FULL_GO", "2026-06-04 10:00:00", task_id),
+        )
+
+        archive = self.client.get("/api/v1/archive-projects", headers=self.headers)
+        self.assertEqual(archive.status_code, 200, archive.text)
+        rows = archive.json()["data"]["items"]
+        self.assertEqual([row["project_id"] for row in rows], [project_id])
+        self.assertEqual(rows[0]["project_name"], "MQD P0 Project")
+        self.assertEqual(rows[0]["models"], ["M1", "M2"])
+        self.assertEqual(rows[0]["qg_node"]["node_code"], "QG2")
+        self.assertEqual(rows[0]["overall_result"], "FULL_GO")
+        self.assertEqual(rows[0]["report_last_modified_at"], "2026-06-04 10:00:00")
+        self.assertEqual(rows[0]["mq_user_name"], "系统管理员")
+        self.assertEqual(rows[0]["latest_report_id"], 1)
+
+        filter_cases = [
+            ("keyword=M2", [project_id]),
+            ("keyword=Archive+Hidden", []),
+            ("qg_node_id=1", [project_id]),
+            ("qg_node_id=2", []),
+            ("overall_result=FULL_GO", [project_id]),
+            ("overall_result=C_GO", []),
+            ("mq_user_id=1", [project_id]),
+            ("modified_from=2026-06-04", [project_id]),
+            ("modified_to=2026-06-03", []),
+        ]
+        for query, expected_ids in filter_cases:
+            response = self.client.get(f"/api/v1/archive-projects?{query}", headers=self.headers)
+            self.assertEqual(response.status_code, 200, f"{query}: {response.text}")
+            self.assertEqual([row["project_id"] for row in response.json()["data"]["items"]], expected_ids, query)
+
+        deleted = self.client.request(
+            "DELETE",
+            f"/api/v1/projects/{project_id}",
+            headers=self.headers,
+            json={"confirm_project_name": "MQD P0 Project", "delete_reason": "hide archive row"},
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        after_delete = self.client.get("/api/v1/archive-projects", headers=self.headers)
+        self.assertEqual(after_delete.status_code, 200, after_delete.text)
+        self.assertEqual(after_delete.json()["data"]["items"], [])
+
     def test_prepare_inspection_task_uses_vdrive_folder_name_without_history(self):
         prepared = self.client.post(
             "/api/v1/inspection-tasks/prepare",
@@ -507,6 +606,63 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(history_version["published_by_name"], "系统管理员")
         self.assertTrue(history_version["is_current"])
         self.assertEqual(history_version["change_details"][0]["item_name"], "History manual item edited")
+
+    def test_prepare_editable_rule_version_copies_current_published_rules_once(self):
+        _, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "DRAFT_COPY_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+
+        draft = self.client.post("/api/v1/qg-nodes/1/editable-rule-version", headers=self.headers)
+        self.assertEqual(draft.status_code, 200, draft.text)
+        draft_data = draft.json()["data"]
+        self.assertEqual(draft_data["status"], "draft")
+        self.assertEqual(draft_data["version_no"], "V02")
+        self.assertEqual(draft_data["change_summary"], "基于 V-P0 编辑")
+        self.assertEqual([rule["rule_code"] for rule in draft_data["business_check_rules"]], ["P0_MANUAL", "P0_AUTO"])
+        copied_auto = next(rule for rule in draft_data["business_check_rules"] if rule["rule_code"] == "P0_AUTO")
+        self.assertEqual(copied_auto["auto_check_execution_rules"][0]["execution_code"], "DRAFT_COPY_FILE_EXISTS")
+
+        repeat = self.client.post("/api/v1/qg-nodes/1/editable-rule-version", headers=self.headers)
+        self.assertEqual(repeat.status_code, 200, repeat.text)
+        self.assertEqual(repeat.json()["data"]["id"], draft_data["id"])
+
+    def test_publish_rule_version_accepts_change_summary(self):
+        _, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "PUBLISH_SUMMARY_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+            json={"change_summary": "QG2 rules updated from workspace"},
+        )
+
+        self.assertEqual(published.status_code, 200, published.text)
+        self.assertEqual(published.json()["data"]["change_summary"], "QG2 rules updated from workspace")
 
     def test_task_creation_rolls_back_when_later_step_fails(self):
         from app.core.database import query_all

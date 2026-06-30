@@ -37,12 +37,14 @@ describe("frontend structure", () => {
       "/api/v1/vdrive/validate-folder-link",
       "/api/v1/projects",
       "/api/v1/qg-nodes",
+      "/api/v1/qg-nodes/",
       "/api/v1/business-rule-versions",
       "/api/v1/inspection-tasks/prepare",
       "/api/v1/inspection-tasks",
       "/api/v1/rectification-items",
       "/api/v1/followup-items",
       "/api/v1/reports",
+      "/api/v1/archive-projects",
       "/api/v1/dashboard/overview",
       "/api/v1/dashboard/my-todos"
     ];
@@ -98,9 +100,9 @@ describe("frontend structure", () => {
         "type=\"checkbox\""
       ],
       "app/projects/page.tsx": ["use client", "listProjects(", "createProject(", "validateVdriveLink("],
-      "app/rules/page.tsx": ["use client", "listQGNodes(", "createRuleVersion(", "publishRuleVersion("],
-      "app/inspection/page.tsx": ["use client", "prepareInspectionTask(", "createInspectionTask(", "confirmInspectionItem(", "archiveCurrentRound("],
-      "app/reports/page.tsx": ["use client", "listReports(", "getReport("],
+      "app/rules/page.tsx": ["use client", "listQGNodes(", "prepareEditableRuleVersion(", "publishRuleVersion("],
+      "app/inspection/page.tsx": ["use client", "prepareInspectionTask(", "listBusinessUserOptions(", "createInspectionTask(", "confirmInspectionItem(", "archiveCurrentRound("],
+      "app/reports/page.tsx": ["use client", "listArchiveProjects(", "listBusinessUserOptions(", "getProject(", "addProjectOrder("],
       "app/rectification/page.tsx": ["use client", "listRectifications(", "triggerRecheck("]
     };
 
@@ -156,7 +158,9 @@ describe("frontend structure", () => {
       "listProjects(params",
       "updateProject(",
       "updateProjectVdrive(",
+      "listBusinessUserOptions(",
       "updateBusinessRule(",
+      "prepareEditableRuleVersion(",
       "getDashboardOverview(",
       "getDashboardTodos("
     ]) {
@@ -214,10 +218,15 @@ describe("frontend structure", () => {
       "updateBusinessRule(",
       "规则管理员可编辑",
       "只读模式",
+      "检查阶段",
+      "rules-workspace",
+      "rules-node-nav",
+      "rules-history-drawer",
+      "rules-modal-backdrop",
       "自动检查项",
       "人工检查项",
       "版本历史",
-      "发布前确认"
+      "发布规则版本"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
@@ -232,9 +241,91 @@ describe("frontend structure", () => {
       "change_details",
       "draftChangeDetails",
       "确认发布规则版本",
-      "当前版本"
+      "当前版本",
+      "新增检查项",
+      "继续编辑未发布规则变更"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
+    }
+  });
+
+  it("aligns reports page with the inspection archive project list", () => {
+    const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
+    const reportsPage = readFileSync(resolve(root, "app/reports/page.tsx"), "utf8");
+    const styles = readFileSync(resolve(root, "app/styles.css"), "utf8");
+
+    for (const snippet of [
+      "export type ArchiveProject",
+      "export type ListArchiveProjectsParams",
+      "export type BusinessUserOption",
+      "listArchiveProjects(",
+      "listBusinessUserOptions(",
+      "/api/v1/archive-projects",
+      "/api/v1/business-user-options",
+      "report_last_modified_at",
+      "latest_report_id"
+    ]) {
+      assert.match(api, new RegExp(snippet.replaceAll("(", "\\(")), `api should contain ${snippet}`);
+    }
+
+    for (const snippet of [
+      "检查档案",
+      "archiveFilters",
+      "项目名称或机型",
+      "全部QG节点",
+      "全部QG结论",
+      "选择日期范围",
+      "重置日期",
+      "导出 Excel",
+      "项目创建时间",
+      "当前QG节点",
+      "本轮结论",
+      "报告修改时间",
+      "项目详情",
+      "机型 & 加单记录",
+      "handleAddOrder",
+      "isAddingOrder",
+      "disabled={isAddingOrder}",
+      "deleteConfirmName",
+      "confirm_project_name: deleteConfirmName"
+    ]) {
+      assert.match(reportsPage, new RegExp(snippet.replaceAll("(", "\\(")), `reports page should contain ${snippet}`);
+    }
+
+    for (const snippet of [
+      ".archive-shell",
+      ".archive-toolbar",
+      ".archive-table",
+      ".archive-result-pill",
+      ".archive-modal-backdrop",
+      ".archive-pagination"
+    ]) {
+      assert.match(styles, new RegExp(snippet.replaceAll(".", "\\.")), `styles should contain ${snippet}`);
+    }
+  });
+
+  it("guards high-impact modal actions against double submission", () => {
+    const rulesPage = readFileSync(resolve(root, "app/rules/page.tsx"), "utf8");
+    const reportsPage = readFileSync(resolve(root, "app/reports/page.tsx"), "utf8");
+
+    for (const snippet of [
+      "isPublishing",
+      "setIsPublishing(true)",
+      "setIsPublishing(false)",
+      "disabled={isPublishing}",
+      "role=\"dialog\"",
+      "aria-modal=\"true\""
+    ]) {
+      assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `rules page should contain ${snippet}`);
+    }
+
+    for (const snippet of [
+      "isAddingOrder",
+      "setIsAddingOrder(true)",
+      "setIsAddingOrder(false)",
+      "disabled={isAddingOrder}"
+    ]) {
+      assert.match(reportsPage, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `reports page should contain ${snippet}`);
     }
   });
 });

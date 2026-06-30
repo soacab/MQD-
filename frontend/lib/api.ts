@@ -30,6 +30,12 @@ export type User = {
   permissions: string[];
 };
 
+export type BusinessUserOption = {
+  id: number;
+  name: string;
+  permissions: string[];
+};
+
 export type LoginResult = {
   access_token: string;
   token_type: string;
@@ -48,6 +54,17 @@ export type ListProjectsParams = {
   status?: string;
   qg_node_id?: string;
   mq_user_id?: string;
+  page?: string;
+  page_size?: string;
+};
+
+export type ListArchiveProjectsParams = {
+  keyword?: string;
+  mq_user_id?: string;
+  qg_node_id?: string;
+  overall_result?: string;
+  modified_from?: string;
+  modified_to?: string;
   page?: string;
   page_size?: string;
 };
@@ -83,7 +100,7 @@ export type Project = {
     folder_path?: string | null;
   };
   orders?: Array<{ id: number; receive_date: string; created_at?: string | null }>;
-  models?: Array<{ id: number; model_name: string }>;
+  models?: Array<{ id: number; project_order_id?: number; model_name: string }>;
 };
 
 export type VDriveValidation = {
@@ -107,6 +124,21 @@ export type QGNode = {
   node_code: string;
   node_name: string;
   sort_order: number;
+};
+
+export type ArchiveProject = {
+  project_id: number;
+  project_name: string;
+  customer: string;
+  models: string[];
+  project_created_at: string;
+  qg_node: QGNode;
+  overall_result: string;
+  report_last_modified_at: string;
+  mq_user_id?: number | null;
+  mq_user_name?: string | null;
+  latest_report_id: number;
+  inspection_task_id: number;
 };
 
 export type RuleVersion = {
@@ -346,6 +378,10 @@ export function listUsers(params: ListUsersParams = {}) {
   return apiRequest<ListResult<User>>(`/api/v1/users${query ? `?${query}` : ""}`);
 }
 
+export function listBusinessUserOptions() {
+  return apiRequest<ListResult<BusinessUserOption>>("/api/v1/business-user-options");
+}
+
 export function createUser(payload: UserPayload & { uid: string }) {
   return apiRequest<User>("/api/v1/users", { method: "POST", body: jsonBody(payload) });
 }
@@ -402,6 +438,17 @@ export function listProjects(params: ListProjectsParams = {}) {
   return apiRequest<ListResult<Project>>(`/api/v1/projects${query ? `?${query}` : ""}`);
 }
 
+export function listArchiveProjects(params: ListArchiveProjectsParams = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      search.set(key, value);
+    }
+  }
+  const query = search.toString();
+  return apiRequest<ListResult<ArchiveProject>>(`/api/v1/archive-projects${query ? `?${query}` : ""}`);
+}
+
 export function createProject(payload: Record<string, unknown>) {
   return apiRequest<Project>("/api/v1/projects", { method: "POST", body: jsonBody(payload) });
 }
@@ -442,6 +489,10 @@ export function createRuleVersion(payload: { qg_node_id: number; version_no: str
   return apiRequest<RuleVersion>("/api/v1/business-rule-versions", { method: "POST", body: jsonBody(payload) });
 }
 
+export function prepareEditableRuleVersion(qgNodeId: number) {
+  return apiRequest<RuleVersion>(`/api/v1/qg-nodes/${qgNodeId}/editable-rule-version`, { method: "POST" });
+}
+
 export function getRuleVersion(versionId: number) {
   return apiRequest<RuleVersion>(`/api/v1/business-rule-versions/${versionId}`);
 }
@@ -467,8 +518,11 @@ export function createExecutionRule(ruleId: number, payload: Record<string, unkn
   });
 }
 
-export function publishRuleVersion(versionId: number) {
-  return apiRequest<RuleVersion>(`/api/v1/business-rule-versions/${versionId}/publish`, { method: "POST" });
+export function publishRuleVersion(versionId: number, payload: { change_summary?: string } = {}) {
+  return apiRequest<RuleVersion>(`/api/v1/business-rule-versions/${versionId}/publish`, {
+    method: "POST",
+    body: jsonBody(payload)
+  });
 }
 
 export function listInspectionTasks() {

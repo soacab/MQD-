@@ -10,14 +10,14 @@ import {
   getInspectionTask,
   listCurrentRoundItems,
   listInspectionTasks,
+  listBusinessUserOptions,
   listQGNodes,
-  listUsers,
   prepareInspectionTask,
+  type BusinessUserOption,
   type InspectionItem,
   type InspectionTaskPrepare,
   type InspectionTask,
-  type QGNode,
-  type User
+  type QGNode
 } from "@/lib/api";
 
 const resultLabels: Record<string, string> = {
@@ -52,7 +52,7 @@ const productionLines = ["FA", "SMT", "组装线 1", "组装线 2"];
 export default function InspectionPage() {
   const [tasks, setTasks] = useState<InspectionTask[]>([]);
   const [qgNodes, setQgNodes] = useState<QGNode[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<BusinessUserOption[]>([]);
   const [selectedTask, setSelectedTask] = useState<InspectionTask | null>(null);
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InspectionItem | null>(null);
@@ -86,7 +86,7 @@ export default function InspectionPage() {
 
   async function loadTaskOptions() {
     try {
-      const [nodeRows, userRows] = await Promise.all([listQGNodes(), listUsers({ status: "active" })]);
+      const [nodeRows, userRows] = await Promise.all([listQGNodes(), listBusinessUserOptions()]);
       setQgNodes(nodeRows.items);
       setUsers(userRows.items);
     } catch (error) {

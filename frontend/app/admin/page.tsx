@@ -52,12 +52,19 @@ export default function AdminPage() {
 
   async function refresh({ clearMessage = true }: { clearMessage?: boolean } = {}) {
     try {
-      const [me, userRows, settings] = await Promise.all([
-        getCurrentUser(),
+      const me = await getCurrentUser();
+      setCurrentUser(me);
+      if (!me.permissions.includes("super_admin")) {
+        setUsers([]);
+        if (clearMessage) {
+          setMessage("只读模式：仅权限管理员可编辑用户、权限和系统设置。");
+        }
+        return;
+      }
+      const [userRows, settings] = await Promise.all([
         listUsers({ keyword, permission: permissionFilter, status: statusFilter }),
         getSystemSettings()
       ]);
-      setCurrentUser(me);
       setUsers(userRows.items);
       setAutoCheckEnabled(Boolean(settings.auto_check_enabled));
       if (clearMessage) {
