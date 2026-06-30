@@ -5,18 +5,24 @@ import {
   createBusinessRule,
   createExecutionRule,
   createRuleVersion,
+  getCurrentUser,
   getRuleVersion,
   listQGNodes,
   listRuleVersions,
   publishRuleVersion,
+  updateBusinessRule,
+  type BusinessRule,
   type QGNode,
-  type RuleVersion
+  type RuleVersion,
+  type User
 } from "@/lib/api";
 
 export default function RulesPage() {
   const [nodes, setNodes] = useState<QGNode[]>([]);
   const [versions, setVersions] = useState<RuleVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<RuleVersion | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [versionForm, setVersionForm] = useState({ qg_node_id: "1", version_no: "V01", change_summary: "P0 演示规则" });
   const [ruleForm, setRuleForm] = useState({
@@ -27,10 +33,12 @@ export default function RulesPage() {
     checklist_requirement: "工程师确认检查结论",
     owner_dept: "MQD"
   });
+  const canManageRules = Boolean(currentUser?.permissions.includes("rules_admin"));
 
   async function refresh(qgNodeId = Number(versionForm.qg_node_id)) {
     try {
-      const [nodeRows, versionRows] = await Promise.all([listQGNodes(), listRuleVersions(qgNodeId)]);
+      const [me, nodeRows, versionRows] = await Promise.all([getCurrentUser(), listQGNodes(), listRuleVersions(qgNodeId)]);
+      setCurrentUser(me);
       setNodes(nodeRows.items);
       setVersions(versionRows.items);
     } catch (error) {
@@ -45,6 +53,10 @@ export default function RulesPage() {
   async function handleCreateVersion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
+      if (!canManageRules) {
+        setMessage("只读模式：规则管理员可编辑，其他用户只能查看。");
+        return;
+      }
       const version = await createRuleVersion({
         qg_node_id: Number(versionForm.qg_node_id),
         version_no: versionForm.version_no,
@@ -61,6 +73,7 @@ export default function RulesPage() {
   async function handleSelectVersion(versionId: number) {
     try {
       setSelectedVersion(await getRuleVersion(versionId));
+      setEditingRuleId(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "版本详情加载失败");
     }
@@ -72,14 +85,26 @@ export default function RulesPage() {
       setMessage("请先选择或创建草稿版本。");
       return;
     }
+    if (!canManageRules) {
+      setMessage("只读模式：规则管理员可编辑，其他用户只能查看。");
+      return;
+    }
+    if (selectedVersion.status !== "draft") {
+      setMessage("只读模式：已发布或已废弃版本不可编辑。");
+      return;
+    }
     try {
-      const rule = await createBusinessRule(selectedVersion.id, {
-        ...ruleForm,
+      const editablePayload = { ...ruleForm };
+      const createPayload = {
+        ...editablePayload,
         sort_order: selectedVersion.business_check_rules?.length || 0,
         is_active: true,
         is_apqp: false
-      });
-      if (rule.item_type === "auto" || rule.item_type === "system") {
+      };
+      const rule = editingRuleId
+        ? await updateBusinessRule(editingRuleId, editablePayload)
+        : await createBusinessRule(selectedVersion.id, createPayload);
+      if (!editingRuleId && (rule.item_type === "auto" || rule.item_type === "system")) {
         await createExecutionRule(rule.id, {
           execution_code: `${rule.rule_code}_EXEC`,
           execution_mode: rule.item_type === "system" ? "system_direct" : "file_existence",
@@ -89,7 +114,8 @@ export default function RulesPage() {
           config_json: { mock: true }
         });
       }
-      setMessage("检查项已保存。");
+      setEditingRuleId(null);
+      setMessage(editingRuleId ? "检查项已更新。" : "检查项已保存。");
       await handleSelectVersion(selectedVersion.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存检查项失败");
@@ -98,6 +124,14 @@ export default function RulesPage() {
 
   async function handlePublish() {
     if (!selectedVersion) {
+      return;
+    }
+    if (!canManageRules) {
+      setMessage("只读模式：规则管理员可发布版本。");
+      return;
+    }
+    const confirmed = window.confirm(`发布前确认\n\n版本：${selectedVersion.version_no}\n变更说明：${selectedVersion.change_summary || "无"}\n\n发布后该版本将不可编辑。`);
+    if (!confirmed) {
       return;
     }
     try {
@@ -110,6 +144,23 @@ export default function RulesPage() {
     }
   }
 
+  function startEditRule(rule: BusinessRule) {
+    setEditingRuleId(rule.id);
+    setRuleForm({
+      rule_code: rule.rule_code,
+      item_name: rule.item_name,
+      item_type: rule.item_type,
+      check_type: rule.check_type,
+      checklist_requirement: rule.checklist_requirement || "",
+      owner_dept: rule.owner_dept || ""
+    });
+  }
+
+  const groupedRules = {
+    manual: selectedVersion?.business_check_rules?.filter((rule) => rule.item_type === "manual" || rule.item_type === "inherit") || [],
+    auto: selectedVersion?.business_check_rules?.filter((rule) => rule.item_type === "auto" || rule.item_type === "system") || []
+  };
+
   return (
     <main className="page">
       <header className="page-header">
@@ -117,6 +168,7 @@ export default function RulesPage() {
         <h1>规则配置与版本发布</h1>
       </header>
       {message ? <p className="notice">{message}</p> : null}
+      {!canManageRules ? <p className="notice">只读模式：规则管理员可编辑，当前用户只能查看版本历史和检查项。</p> : null}
       <section className="two-column">
         <form className="form-panel" onSubmit={handleCreateVersion}>
           <h2>规则版本</h2>
@@ -150,16 +202,18 @@ export default function RulesPage() {
               onChange={(event) => setVersionForm({ ...versionForm, change_summary: event.target.value })}
             />
           </label>
-          <button type="submit">创建草稿</button>
+          <button type="submit" disabled={!canManageRules}>创建草稿</button>
         </form>
         <form className="form-panel" onSubmit={handleCreateRule}>
-          <h2>检查项</h2>
+          <h2>{editingRuleId ? "编辑检查项" : "检查项"}</h2>
+          <p>规则管理员可编辑；点检执行和项目管理权限用户进入只读模式。</p>
           <label>
             检查项编码
             <input
               name="rule_code"
               value={ruleForm.rule_code}
               onChange={(event) => setRuleForm({ ...ruleForm, rule_code: event.target.value })}
+              disabled={Boolean(editingRuleId) || !canManageRules}
             />
           </label>
           <label>
@@ -168,6 +222,7 @@ export default function RulesPage() {
               name="item_name"
               value={ruleForm.item_name}
               onChange={(event) => setRuleForm({ ...ruleForm, item_name: event.target.value })}
+              disabled={!canManageRules}
             />
           </label>
           <label>
@@ -176,6 +231,7 @@ export default function RulesPage() {
               name="item_type"
               value={ruleForm.item_type}
               onChange={(event) => setRuleForm({ ...ruleForm, item_type: event.target.value, check_type: event.target.value })}
+              disabled={!canManageRules}
             >
               <option value="manual">人工</option>
               <option value="auto">自动</option>
@@ -188,20 +244,31 @@ export default function RulesPage() {
             <input
               value={ruleForm.checklist_requirement}
               onChange={(event) => setRuleForm({ ...ruleForm, checklist_requirement: event.target.value })}
+              disabled={!canManageRules}
             />
           </label>
-          <button type="submit">保存检查项</button>
+          <label>
+            责任方
+            <input
+              value={ruleForm.owner_dept}
+              onChange={(event) => setRuleForm({ ...ruleForm, owner_dept: event.target.value })}
+              disabled={!canManageRules}
+            />
+          </label>
+          <button type="submit" disabled={!canManageRules || selectedVersion?.status !== "draft"}>{editingRuleId ? "更新检查项" : "保存检查项"}</button>
         </form>
       </section>
       <section className="two-column spaced">
         <section className="module">
-          <h2>版本列表</h2>
+          <h2>版本历史</h2>
           <table>
             <thead>
               <tr>
                 <th>ID</th>
                 <th>版本</th>
                 <th>状态</th>
+                <th>变更说明</th>
+                <th>发布时间</th>
               </tr>
             </thead>
             <tbody>
@@ -210,6 +277,8 @@ export default function RulesPage() {
                   <td>{version.id}</td>
                   <td>{version.version_no}</td>
                   <td>{version.status}</td>
+                  <td>{version.change_summary || "-"}</td>
+                  <td>{version.published_at || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -225,10 +294,24 @@ export default function RulesPage() {
               <button type="button" disabled={selectedVersion.status !== "draft"} onClick={handlePublish}>
                 发布规则版本
               </button>
+              <p>发布前确认：{selectedVersion.change_summary || "未填写变更说明"}</p>
+              <h3>人工检查项</h3>
               <ul className="plain-list">
-                {selectedVersion.business_check_rules?.map((rule) => (
+                {groupedRules.manual.map((rule) => (
                   <li key={rule.id}>
-                    {rule.rule_code}：{rule.item_name}（{rule.item_type}）
+                    <button className="link-button" type="button" onClick={() => startEditRule(rule)}>
+                      {rule.rule_code}：{rule.item_name}（{rule.item_type}）
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <h3>自动检查项</h3>
+              <ul className="plain-list">
+                {groupedRules.auto.map((rule) => (
+                  <li key={rule.id}>
+                    <button className="link-button" type="button" onClick={() => startEditRule(rule)}>
+                      {rule.rule_code}：{rule.item_name}（{rule.item_type}）
+                    </button>
                   </li>
                 ))}
               </ul>

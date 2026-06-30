@@ -225,13 +225,19 @@ export default function AdminPage() {
     <main className="page">
       <header className="page-header">
         <p className="eyebrow">后台管理</p>
-        <h1>用户与权限</h1>
+        <h1>用户与权限 / 系统设置</h1>
       </header>
       {message ? <p className="notice">{message}</p> : null}
       {!canManageAccounts ? <p className="notice">只读模式：仅权限管理员可编辑用户、权限和系统设置。</p> : null}
 
-      <section className="two-column">
-        <form className="form-panel" onSubmit={handleSaveUser}>
+      <section className="admin-layout">
+        <nav className="admin-nav" aria-label="后台分区">
+          <a href="#accounts">用户与权限</a>
+          <a href="#settings">系统设置</a>
+        </nav>
+
+        <div className="admin-main">
+          <form id="accounts" className="form-panel" onSubmit={handleSaveUser}>
           <h2>{editingUserId ? `编辑账号 · ${form.uid}` : "添加用户"}</h2>
           <label>
             UID
@@ -300,7 +306,7 @@ export default function AdminPage() {
           </div>
         </form>
 
-        <form className="form-panel" onSubmit={handleSaveSetting}>
+        <form id="settings" className="form-panel" onSubmit={handleSaveSetting}>
           <h2>系统设置</h2>
           <label className="inline">
             <input
@@ -315,7 +321,6 @@ export default function AdminPage() {
             保存设置
           </button>
         </form>
-      </section>
 
       <section className="module spaced">
         <div className="section-heading">
@@ -386,6 +391,7 @@ export default function AdminPage() {
           </tbody>
         </table>
       </section>
+        </div>
 
       <aside className="module spaced">
         <h2>权限说明</h2>
@@ -398,6 +404,7 @@ export default function AdminPage() {
           ))}
         </div>
       </aside>
+      </section>
     </main>
   );
 }

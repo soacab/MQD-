@@ -6,12 +6,15 @@ import {
   confirmInspectionItem,
   convertInspectionItemToManual,
   createInspectionTask,
+  getProject,
   getInspectionItem,
   getInspectionTask,
   listCurrentRoundItems,
   listInspectionTasks,
+  validateVdriveLink,
   type InspectionItem,
-  type InspectionTask
+  type InspectionTask,
+  type VDriveValidation
 } from "@/lib/api";
 
 const resultLabels: Record<string, string> = {
@@ -26,6 +29,7 @@ export default function InspectionPage() {
   const [selectedTask, setSelectedTask] = useState<InspectionTask | null>(null);
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<InspectionItem | null>(null);
+  const [vdrivePreview, setVdrivePreview] = useState<(VDriveValidation & { project_id: string }) | null>(null);
   const [message, setMessage] = useState("");
   const [taskForm, setTaskForm] = useState({ project_id: "", qg_node_id: "" });
   const [decisionForm, setDecisionForm] = useState({
@@ -65,6 +69,10 @@ export default function InspectionPage() {
 
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!vdrivePreview || vdrivePreview.project_id !== taskForm.project_id) {
+      setMessage("请先校验 VDrive 路径。");
+      return;
+    }
     try {
       const task = await createInspectionTask({
         project_id: Number(taskForm.project_id),
@@ -78,6 +86,28 @@ export default function InspectionPage() {
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "创建任务失败");
+    }
+  }
+
+  async function handleValidateProjectVdrive() {
+    if (!taskForm.project_id) {
+      setMessage("请先填写项目 ID。");
+      return;
+    }
+    try {
+      const project = await getProject(Number(taskForm.project_id));
+      const vdriveUrl = project.vdrive?.url || project.vdrive_url;
+      if (!vdriveUrl) {
+        setVdrivePreview(null);
+        setMessage("项目未保存 VDrive 链接，不能创建点检任务。");
+        return;
+      }
+      const result = await validateVdriveLink(vdriveUrl);
+      setVdrivePreview({ ...result, project_id: taskForm.project_id });
+      setMessage(`VDrive 路径已校验：${result.folder_path}`);
+    } catch (error) {
+      setVdrivePreview(null);
+      setMessage(error instanceof Error ? error.message : "VDrive 路径校验失败");
     }
   }
 
@@ -187,7 +217,10 @@ export default function InspectionPage() {
             <input
               name="project_id"
               value={taskForm.project_id}
-              onChange={(event) => setTaskForm({ ...taskForm, project_id: event.target.value })}
+              onChange={(event) => {
+                setTaskForm({ ...taskForm, project_id: event.target.value });
+                setVdrivePreview(null);
+              }}
               required
             />
           </label>
@@ -200,7 +233,15 @@ export default function InspectionPage() {
               required
             />
           </label>
-          <button type="submit">创建任务</button>
+          <div className="button-row">
+            <button className="secondary-button" type="button" onClick={handleValidateProjectVdrive}>
+              校验 VDrive 路径
+            </button>
+            <button type="submit" disabled={!vdrivePreview || vdrivePreview.project_id !== taskForm.project_id}>
+              创建任务
+            </button>
+          </div>
+          {vdrivePreview ? <p className="notice">已识别：{vdrivePreview.folder_path}</p> : null}
         </form>
         <section className="module">
           <h2>任务列表</h2>

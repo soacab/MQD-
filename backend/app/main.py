@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-import zlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -28,6 +26,7 @@ from app.core.enums import (
 )
 from app.core.exceptions import BusinessError, business_error_handler
 from app.seed import seed_database
+from app.vdrive import validate_vdrive_folder_link
 
 
 @asynccontextmanager
@@ -267,18 +266,7 @@ def replace_user_permissions(target_user_id: int, permissions: list[str]) -> Non
 
 
 def parse_vdrive_url(url: str) -> dict[str, Any]:
-    match = re.search(r"(?:enterprise_|folderGuid=|id=)([A-Za-z0-9_-]+)", url or "")
-    if not match:
-        raise BusinessError("INVALID_VDRIVE_URL", "无法从链接中解析 VDrive folderGuid")
-    guid = match.group(1)
-    folder_id = zlib.crc32(guid.encode("utf-8")) % 1_000_000_000
-    return {
-        "valid": True,
-        "folder_guid": guid,
-        "folder_id": folder_id,
-        "folder_name": f"VDrive-{guid}",
-        "folder_path": f"/mock/{guid}",
-    }
+    return validate_vdrive_folder_link(url)
 
 
 def paginate(items: list[dict[str, Any]], page: int = 1, page_size: int = 20) -> dict[str, Any]:
@@ -1005,6 +993,108 @@ def current_round_items(task_id: int, user: dict = Depends(current_user)) -> dic
     )
     items = query_all("SELECT * FROM inspection_items WHERE inspection_round_id = ? ORDER BY sort_order", (round_row["id"],))
     return ok({"round_id": round_row["id"], "round_no": round_row["round_no"], "items": items})
+
+
+def scoped_tasks_for_dashboard(user: dict[str, Any]) -> list[dict[str, Any]]:
+    require_business_scope(user)
+    rows = query_all("SELECT * FROM inspection_tasks ORDER BY id DESC")
+    rows = [row for row in rows if task_project_is_active(row)]
+    if has_full_business_scope(user):
+        return rows
+    return [row for row in rows if task_in_business_scope(row, user)]
+
+
+def task_progress(task_id: int) -> dict[str, int]:
+    items = query_all("SELECT status FROM inspection_items WHERE inspection_task_id = ?", (task_id,))
+    confirmed = len([item for item in items if item["status"] in (InspectionItemStatus.CONFIRMED, InspectionItemStatus.INHERITED)])
+    return {"total": len(items), "confirmed": confirmed, "pending": len(items) - confirmed}
+
+
+def dashboard_task_card(task: dict[str, Any], todo_type: str) -> dict[str, Any]:
+    project = query_one("SELECT project_name FROM projects WHERE id = ?", (task["project_id"],))
+    qg_node = query_one("SELECT node_code FROM qg_nodes WHERE id = ?", (task["qg_node_id"],))
+    progress = task_progress(task["id"])
+    return {
+        "type": todo_type,
+        "target_id": task["id"],
+        "task_id": task["id"],
+        "project_id": task["project_id"],
+        "project_name": project["project_name"] if project else "",
+        "qg_node": qg_node["node_code"] if qg_node else "",
+        "status": task["status"],
+        "href": f"/inspection?task_id={task['id']}",
+        "summary": f"{progress['confirmed']}/{progress['total']} 项已确认",
+    }
+
+
+@app.get("/api/v1/dashboard/overview")
+def dashboard_overview(user: dict = Depends(current_user)) -> dict[str, Any]:
+    tasks = scoped_tasks_for_dashboard(user)
+    rectifications = filter_task_scoped_rows(query_all("SELECT * FROM rectification_items ORDER BY id"), user)
+    followups = filter_task_scoped_rows(query_all("SELECT * FROM followup_items ORDER BY id"), user)
+
+    running = [task for task in tasks if task["status"] == InspectionTaskStatus.RUNNING]
+    archive_ready = []
+    for task in running:
+        progress = task_progress(task["id"])
+        if progress["total"] > 0 and progress["pending"] == 0:
+            archive_ready.append(task)
+
+    return ok(
+        {
+            "running_count": len(running),
+            "recheck_count": len([task for task in tasks if task["status"] == InspectionTaskStatus.RECTIFYING]),
+            "rectification_count": len([item for item in rectifications if not item["marked_done_at"]]),
+            "followup_count": len([item for item in followups if not item["closed_at"]]),
+            "archive_ready_count": len(archive_ready),
+        }
+    )
+
+
+@app.get("/api/v1/dashboard/my-todos")
+def dashboard_my_todos(user: dict = Depends(current_user)) -> dict[str, Any]:
+    tasks = scoped_tasks_for_dashboard(user)
+    rows: list[dict[str, Any]] = []
+    for task in tasks:
+        if task["status"] == InspectionTaskStatus.RUNNING:
+            progress = task_progress(task["id"])
+            rows.append(dashboard_task_card(task, "archive_ready" if progress["total"] > 0 and progress["pending"] == 0 else "running_task"))
+        elif task["status"] == InspectionTaskStatus.RECTIFYING:
+            rows.append(dashboard_task_card(task, "recheck_task"))
+
+    for item in filter_task_scoped_rows(query_all("SELECT * FROM rectification_items ORDER BY planned_finish_date, id"), user):
+        if not item["marked_done_at"]:
+            rows.append(
+                {
+                    "type": "rectification_item",
+                    "target_id": item["id"],
+                    "task_id": item["inspection_task_id"],
+                    "project_id": item["project_id"],
+                    "title": item["item_name_snapshot"],
+                    "status": "pending",
+                    "href": f"/rectification?task_id={item['inspection_task_id']}",
+                    "summary": f"整改责任人：{item['responsible_owner']}",
+                    "planned_finish_date": item["planned_finish_date"],
+                }
+            )
+
+    for item in filter_task_scoped_rows(query_all("SELECT * FROM followup_items ORDER BY planned_finish_date, id"), user):
+        if not item["closed_at"]:
+            rows.append(
+                {
+                    "type": "followup_item",
+                    "target_id": item["id"],
+                    "task_id": item["inspection_task_id"],
+                    "project_id": item["project_id"],
+                    "title": item["item_name_snapshot"],
+                    "status": "pending",
+                    "href": f"/rectification?task_id={item['inspection_task_id']}",
+                    "summary": f"待跟进责任人：{item['responsible_owner']}",
+                    "planned_finish_date": item["planned_finish_date"],
+                }
+            )
+
+    return ok({"items": rows, "total": len(rows)})
 
 
 @app.get("/api/v1/inspection-items/{item_id}")

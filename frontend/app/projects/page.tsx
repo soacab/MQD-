@@ -16,6 +16,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [vdriveResult, setVdriveResult] = useState<VDriveValidation | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({
     project_name: "",
@@ -74,6 +75,7 @@ export default function ProjectsPage() {
     try {
       const detail = await getProject(projectId);
       setSelectedProject(detail);
+      setDeleteConfirmName("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "项目详情加载失败");
     }
@@ -104,12 +106,17 @@ export default function ProjectsPage() {
     if (!selectedProject) {
       return;
     }
+    if (deleteConfirmName !== selectedProject.project_name) {
+      setMessage("请手动输入项目名称确认作废。");
+      return;
+    }
     try {
       await deleteProject(selectedProject.id, {
-        confirm_project_name: selectedProject.project_name,
+        confirm_project_name: deleteConfirmName,
         delete_reason: "前端最小闭环作废"
       });
       setSelectedProject(null);
+      setDeleteConfirmName("");
       setMessage("项目已作废。");
       await refresh();
     } catch (error) {
@@ -223,10 +230,18 @@ export default function ProjectsPage() {
               onChange={(event) => setOrderForm({ ...orderForm, models: event.target.value })}
             />
             <button type="submit">保存加单</button>
-            <button className="secondary-button" type="button" onClick={handleDelete}>
+          </form>
+          <div className="inline-form">
+            <input
+              aria-label="手动输入项目名称"
+              placeholder={`手动输入项目名称：${selectedProject.project_name}`}
+              value={deleteConfirmName}
+              onChange={(event) => setDeleteConfirmName(event.target.value)}
+            />
+            <button className="secondary-button" type="button" onClick={handleDelete} disabled={deleteConfirmName !== selectedProject.project_name}>
               作废项目
             </button>
-          </form>
+          </div>
         </section>
       ) : null}
     </main>

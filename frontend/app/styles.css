@@ -149,6 +149,12 @@ nav a:hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .page {
   min-height: 100vh;
   padding: 28px;
@@ -357,6 +363,40 @@ nav a:hover {
   line-height: 1.5;
 }
 
+.admin-layout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-nav {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e0e4ea;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.admin-nav a {
+  border-radius: 6px;
+  color: #253041;
+  padding: 9px 10px;
+}
+
+.admin-nav a:hover {
+  background: #eef4ff;
+  color: #1d4d92;
+}
+
+.admin-main {
+  display: grid;
+  gap: 16px;
+}
+
 .stack {
   display: grid;
   gap: 10px;
@@ -442,6 +482,8 @@ tbody tr:hover {
 
   .summary,
   .grid,
+  .dashboard-grid,
+  .admin-layout,
   .two-column,
   .three-column,
   .filters,

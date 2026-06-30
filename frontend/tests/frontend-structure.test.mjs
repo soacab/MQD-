@@ -10,8 +10,13 @@ describe("frontend structure", () => {
     const page = readFileSync(resolve(root, "app/page.tsx"), "utf8");
     const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
 
-    assert.match(page, /P0 主流程工作台/);
+    assert.match(page, /工作台与待办/);
     assert.match(page, /fetchHealth/);
+    assert.match(page, /getDashboardOverview/);
+    assert.match(page, /getDashboardTodos/);
+    for (const snippet of ["进行中", "复查中", "待跟进", "待归档"]) {
+      assert.match(page, new RegExp(snippet), `home page should expose ${snippet}`);
+    }
     assert.match(api, /\/health/);
   });
 
@@ -36,7 +41,9 @@ describe("frontend structure", () => {
       "/api/v1/inspection-tasks",
       "/api/v1/rectification-items",
       "/api/v1/followup-items",
-      "/api/v1/reports"
+      "/api/v1/reports",
+      "/api/v1/dashboard/overview",
+      "/api/v1/dashboard/my-todos"
     ];
 
     for (const endpoint of endpoints) {
@@ -84,6 +91,9 @@ describe("frontend structure", () => {
         "权限管理",
         "只读模式",
         "确认删除 UID",
+        "admin-layout",
+        "admin-nav",
+        "用户与权限 / 系统设置",
         "type=\"checkbox\""
       ],
       "app/projects/page.tsx": ["use client", "listProjects(", "createProject(", "validateVdriveLink("],
@@ -129,6 +139,44 @@ describe("frontend structure", () => {
       "disabled={!canManageAccounts || isCurrentUser(item)}"
     ]) {
       assert.match(adminPage, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `admin page should contain ${snippet}`);
+    }
+  });
+
+  it("supports P0 experience hardening for VDrive, rules, and dashboard", () => {
+    const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
+    const projectsPage = readFileSync(resolve(root, "app/projects/page.tsx"), "utf8");
+    const inspectionPage = readFileSync(resolve(root, "app/inspection/page.tsx"), "utf8");
+    const rulesPage = readFileSync(resolve(root, "app/rules/page.tsx"), "utf8");
+
+    for (const snippet of [
+      "getProject(",
+      "updateBusinessRule(",
+      "getDashboardOverview(",
+      "getDashboardTodos("
+    ]) {
+      assert.match(api, new RegExp(snippet.replaceAll("(", "\\(")), `api should contain ${snippet}`);
+    }
+
+    for (const snippet of ["getProject(", "validateVdriveLink(", "vdrivePreview", "校验 VDrive 路径"]) {
+      assert.match(inspectionPage, new RegExp(snippet.replaceAll("(", "\\(")), `inspection page should contain ${snippet}`);
+    }
+
+    for (const snippet of ["deleteConfirmName", "手动输入项目名称", "confirm_project_name: deleteConfirmName"]) {
+      assert.match(projectsPage, new RegExp(snippet.replaceAll("(", "\\(")), `projects page should contain ${snippet}`);
+    }
+
+    for (const snippet of [
+      "getCurrentUser(",
+      "canManageRules",
+      "updateBusinessRule(",
+      "规则管理员可编辑",
+      "只读模式",
+      "自动检查项",
+      "人工检查项",
+      "版本历史",
+      "发布前确认"
+    ]) {
+      assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
   });
 });

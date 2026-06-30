@@ -1,4 +1,7 @@
-import { fetchHealth } from "@/lib/api";
+"use client";
+
+import { useEffect, useState } from "react";
+import { fetchHealth, getDashboardOverview, getDashboardTodos, type DashboardOverview, type DashboardTodo } from "@/lib/api";
 
 const modules = [
   ["项目", "项目创建、VDrive 链接、加单、软删除", "/projects"],
@@ -9,8 +12,43 @@ const modules = [
   ["后台", "账号权限、系统设置、审计日志", "/admin"]
 ];
 
-export default async function Page() {
-  const health = await fetchHealth();
+const defaultOverview: DashboardOverview = {
+  running_count: 0,
+  recheck_count: 0,
+  rectification_count: 0,
+  followup_count: 0,
+  archive_ready_count: 0
+};
+
+const todoSections = [
+  { key: "running_task", label: "进行中" },
+  { key: "recheck_task", label: "复查中" },
+  { key: "rectification_item", label: "待整改" },
+  { key: "followup_item", label: "待跟进" },
+  { key: "archive_ready", label: "待归档" }
+];
+
+export default function Page() {
+  const [health, setHealth] = useState({ status: "loading", reachable: false });
+  const [overview, setOverview] = useState<DashboardOverview>(defaultOverview);
+  const [todos, setTodos] = useState<DashboardTodo[]>([]);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    async function loadDashboard() {
+      const healthResult = await fetchHealth();
+      setHealth(healthResult);
+      try {
+        const [overviewResult, todoResult] = await Promise.all([getDashboardOverview(), getDashboardTodos()]);
+        setOverview(overviewResult);
+        setTodos(todoResult.items);
+        setMessage("");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "登录后可查看个人待办。");
+      }
+    }
+    void loadDashboard();
+  }, []);
 
   return (
     <main className="shell">
@@ -32,38 +70,63 @@ export default async function Page() {
       <section className="content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">P0 主流程工作台</p>
-            <h2>项目到复查的最小闭环</h2>
+            <p className="eyebrow">工作台与待办</p>
+            <h2>当前任务入口</h2>
           </div>
-          <div className={health.reachable ? "status ok" : "status warn"}>
-            后端 /health: {health.status}
-          </div>
+          <div className={health.reachable ? "status ok" : "status warn"}>后端 /health: {health.status}</div>
         </header>
+
+        {message ? <p className="notice">{message}</p> : null}
 
         <section className="summary">
           <div>
-            <span>1</span>
-            <strong>创建项目</strong>
-            <p>保存项目上下文和 VDrive 文件夹标识。</p>
+            <span>{overview.running_count}</span>
+            <strong>进行中</strong>
+            <p>正在执行的点检任务。</p>
           </div>
           <div>
-            <span>2</span>
-            <strong>发布规则</strong>
-            <p>冻结业务规则和自动执行规则。</p>
+            <span>{overview.recheck_count}</span>
+            <strong>复查中</strong>
+            <p>整改完成后等待复查的任务。</p>
           </div>
           <div>
-            <span>3</span>
-            <strong>执行点检</strong>
-            <p>生成检查项，工程师确认最终结论。</p>
+            <span>{overview.followup_count}</span>
+            <strong>待跟进</strong>
+            <p>C-GO 后需要关闭的跟进项。</p>
           </div>
           <div>
-            <span>4</span>
-            <strong>归档复查</strong>
-            <p>生成报告、整改项和下一轮复查。</p>
+            <span>{overview.archive_ready_count}</span>
+            <strong>待归档</strong>
+            <p>检查项已确认，可归档当前轮。</p>
           </div>
         </section>
 
-        <section className="grid" aria-label="模块入口">
+        <section className="dashboard-grid">
+          {todoSections.map((section) => {
+            const sectionTodos = todos.filter((todo) => todo.type === section.key);
+            return (
+              <section className="module" key={section.key}>
+                <h3>{section.label}</h3>
+                {sectionTodos.length ? (
+                  <ul className="plain-list">
+                    {sectionTodos.map((todo) => (
+                      <li key={`${todo.type}-${todo.target_id}`}>
+                        <a className="module-link" href={todo.href}>
+                          {todo.title || todo.project_name || `任务 ${todo.task_id || todo.target_id}`}
+                        </a>
+                        <p>{todo.summary || todo.status}</p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>暂无待办。</p>
+                )}
+              </section>
+            );
+          })}
+        </section>
+
+        <section className="grid spaced" aria-label="模块入口">
           {modules.map(([title, description, href]) => (
             <article id={title} key={title} className="module">
               <h3>{title}</h3>

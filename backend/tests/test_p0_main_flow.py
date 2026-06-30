@@ -46,6 +46,15 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(me.status_code, 200, me.text)
         self.assertIn("super_admin", me.json()["data"]["permissions"])
 
+    def test_vdrive_mock_adapter_is_replaceable_boundary(self):
+        from app.vdrive import MockVDriveAdapter, validate_vdrive_folder_link
+
+        result = validate_vdrive_folder_link("https://vdrive.example.com/?folderGuid=BOUNDARY", MockVDriveAdapter())
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["folder_guid"], "BOUNDARY")
+        self.assertIn("folder_path", result)
+
     def test_app_startup_creates_schema_before_seed(self):
         from app.core.database import close_database
         from app.main import app
@@ -179,6 +188,44 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(recheck.json()["data"]["task_status"], "running")
         self.assertEqual(recheck.json()["data"]["new_round_no"], 2)
         self.assertEqual(recheck.json()["data"]["generated_items_count"], 1)
+
+    def test_dashboard_overview_and_todos_follow_current_scope(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "DASHBOARD_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+        )
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+        task_id = task.json()["data"]["inspection_task_id"]
+
+        overview = self.client.get("/api/v1/dashboard/overview", headers=self.headers)
+        self.assertEqual(overview.status_code, 200, overview.text)
+        self.assertEqual(overview.json()["data"]["running_count"], 1)
+        self.assertEqual(overview.json()["data"]["archive_ready_count"], 0)
+
+        todos = self.client.get("/api/v1/dashboard/my-todos", headers=self.headers)
+        self.assertEqual(todos.status_code, 200, todos.text)
+        todo_rows = todos.json()["data"]["items"]
+        self.assertTrue(any(row["type"] == "running_task" and row["target_id"] == task_id for row in todo_rows))
 
     def test_task_creation_rolls_back_when_later_step_fails(self):
         from app.core.database import query_all

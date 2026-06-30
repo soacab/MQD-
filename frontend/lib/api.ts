@@ -92,6 +92,8 @@ export type RuleVersion = {
   version_no: string;
   status: string;
   change_summary?: string | null;
+  published_by?: number | null;
+  published_at?: string | null;
   business_check_rules?: BusinessRule[];
 };
 
@@ -199,6 +201,28 @@ export type FollowUpItem = {
   responsible_owner: string;
   planned_finish_date: string;
   closed_at?: string | null;
+};
+
+export type DashboardOverview = {
+  running_count: number;
+  recheck_count: number;
+  rectification_count: number;
+  followup_count: number;
+  archive_ready_count: number;
+};
+
+export type DashboardTodo = {
+  type: string;
+  target_id: number;
+  task_id?: number;
+  project_id?: number;
+  project_name?: string;
+  qg_node?: string;
+  title?: string;
+  status?: string;
+  href: string;
+  summary?: string;
+  planned_finish_date?: string;
 };
 
 export type ListResult<T> = {
@@ -380,6 +404,13 @@ export function createBusinessRule(versionId: number, payload: Record<string, un
   });
 }
 
+export function updateBusinessRule(ruleId: number, payload: Record<string, unknown>) {
+  return apiRequest<BusinessRule>(`/api/v1/business-check-rules/${ruleId}`, {
+    method: "PATCH",
+    body: jsonBody(payload)
+  });
+}
+
 export function createExecutionRule(ruleId: number, payload: Record<string, unknown>) {
   return apiRequest<AutoCheckExecutionRule>(`/api/v1/business-check-rules/${ruleId}/auto-check-execution-rules`, {
     method: "POST",
@@ -479,4 +510,12 @@ export function listReports(params: { project_id?: string; qg_node_id?: string; 
 
 export function getReport(reportId: number) {
   return apiRequest<Report>(`/api/v1/reports/${reportId}`);
+}
+
+export function getDashboardOverview() {
+  return apiRequest<DashboardOverview>("/api/v1/dashboard/overview");
+}
+
+export function getDashboardTodos() {
+  return apiRequest<ListResult<DashboardTodo>>("/api/v1/dashboard/my-todos");
 }
