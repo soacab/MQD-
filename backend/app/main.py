@@ -114,6 +114,115 @@ def require_permissions(user: dict[str, Any], allowed: set[str]) -> None:
         raise BusinessError("FORBIDDEN", "权限不足", 403)
 
 
+def business_permissions(user: dict[str, Any]) -> set[str]:
+    return set(permissions_for_user(user["id"])).intersection(
+        {Permission.INSPECTION_ENGINEER, Permission.PROJECT_ADMIN}
+    )
+
+
+def has_full_business_scope(user: dict[str, Any]) -> bool:
+    return Permission.PROJECT_ADMIN in business_permissions(user)
+
+
+def require_business_scope(user: dict[str, Any]) -> None:
+    if not business_permissions(user):
+        raise BusinessError("FORBIDDEN", "权限不足", 403)
+
+
+def ensure_project_active(project: dict[str, Any]) -> None:
+    if project["status"] == ProjectStatus.DELETED:
+        raise BusinessError("PROJECT_DELETED", "已删除项目不能进入业务页面")
+
+
+def require_rule_read_permissions(user: dict[str, Any]) -> None:
+    require_permissions(user, {Permission.RULES_ADMIN, Permission.INSPECTION_ENGINEER, Permission.PROJECT_ADMIN})
+
+
+def task_in_business_scope(task: dict[str, Any], user: dict[str, Any]) -> bool:
+    if has_full_business_scope(user):
+        return True
+    return Permission.INSPECTION_ENGINEER in business_permissions(user) and task["created_by"] == user["id"]
+
+
+def project_in_business_scope(project_id: int, user: dict[str, Any]) -> bool:
+    if has_full_business_scope(user):
+        return True
+    if Permission.INSPECTION_ENGINEER not in business_permissions(user):
+        return False
+    return bool(
+        query_one(
+            "SELECT id FROM inspection_tasks WHERE project_id = ? AND created_by = ? LIMIT 1",
+            (project_id, user["id"]),
+        )
+    )
+
+
+def require_project_scope(user: dict[str, Any], project: dict[str, Any]) -> None:
+    if not project_in_business_scope(project["id"], user):
+        raise BusinessError("FORBIDDEN", "权限不足", 403)
+    ensure_project_active(project)
+
+
+def task_project_is_active(task: dict[str, Any]) -> bool:
+    project = query_one("SELECT * FROM projects WHERE id = ?", (task["project_id"],))
+    return bool(project and project["status"] != ProjectStatus.DELETED)
+
+
+def require_task_scope(user: dict[str, Any], task_id: int) -> dict[str, Any]:
+    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
+    if not task_in_business_scope(task, user):
+        raise BusinessError("FORBIDDEN", "权限不足", 403)
+    project = query_one("SELECT * FROM projects WHERE id = ?", (task["project_id"],))
+    ensure_project_active(project)
+    return task
+
+
+def require_item_scope(user: dict[str, Any], item_id: int) -> dict[str, Any]:
+    item = row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
+    require_task_scope(user, item["inspection_task_id"])
+    return item
+
+
+def require_rectification_scope(user: dict[str, Any], rectification_id: int) -> dict[str, Any]:
+    rectification = row_or_404(
+        "SELECT * FROM rectification_items WHERE id = ?",
+        (rectification_id,),
+        "RECTIFICATION_NOT_FOUND",
+        "整改项不存在",
+    )
+    require_task_scope(user, rectification["inspection_task_id"])
+    return rectification
+
+
+def require_followup_scope(user: dict[str, Any], followup_id: int) -> dict[str, Any]:
+    followup = row_or_404(
+        "SELECT * FROM followup_items WHERE id = ?",
+        (followup_id,),
+        "FOLLOWUP_NOT_FOUND",
+        "待跟进项不存在",
+    )
+    require_task_scope(user, followup["inspection_task_id"])
+    return followup
+
+
+def require_report_scope(user: dict[str, Any], report_id: int) -> dict[str, Any]:
+    report = row_or_404("SELECT * FROM inspection_reports WHERE id = ?", (report_id,), "REPORT_NOT_FOUND", "报告不存在")
+    require_task_scope(user, report["inspection_task_id"])
+    return report
+
+
+def filter_task_scoped_rows(rows: list[dict[str, Any]], user: dict[str, Any], task_key: str = "inspection_task_id") -> list[dict[str, Any]]:
+    require_business_scope(user)
+    filtered = []
+    for row in rows:
+        task = query_one("SELECT * FROM inspection_tasks WHERE id = ?", (row[task_key],))
+        if not task or not task_project_is_active(task):
+            continue
+        if has_full_business_scope(user) or task_in_business_scope(task, user):
+            filtered.append(row)
+    return filtered
+
+
 def require_editable_user(user_id: int) -> dict[str, Any]:
     return row_or_404(
         "SELECT * FROM users WHERE id = ? AND status != ?",
@@ -215,8 +324,7 @@ def list_users(
     if status:
         if status not in {status.value for status in UserStatus}:
             raise BusinessError("INVALID_USER_STATUS", f"未知用户状态 {status}")
-    else:
-        rows = [r for r in rows if r["status"] != UserStatus.DELETED]
+    rows = [r for r in rows if r["status"] != UserStatus.DELETED]
     if keyword:
         rows = [r for r in rows if keyword in r["uid"] or keyword in r["name"] or keyword in (r["email"] or "")]
     if status:
@@ -344,9 +452,13 @@ def list_projects(
     status: str | None = None,
     page: int = 1,
     page_size: int = 20,
-    _: dict = Depends(current_user),
+    user: dict = Depends(current_user),
 ) -> dict[str, Any]:
+    require_business_scope(user)
     rows = query_all("SELECT * FROM projects ORDER BY id DESC")
+    rows = [row for row in rows if row["status"] != ProjectStatus.DELETED]
+    if not has_full_business_scope(user):
+        rows = [row for row in rows if project_in_business_scope(row["id"], user)]
     selected_status = status or ProjectStatus.NORMAL
     rows = [row for row in rows if row["status"] == selected_status]
     if keyword:
@@ -372,8 +484,10 @@ def project_detail(project: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/v1/projects/{project_id}")
-def get_project(project_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
+def get_project(project_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_business_scope(user)
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
+    require_project_scope(user, project)
     return ok(project_detail(project))
 
 
@@ -496,12 +610,14 @@ def delete_project(project_id: int, payload: dict = Body(...), user: dict = Depe
 
 
 @app.get("/api/v1/qg-nodes")
-def list_qg_nodes(_: dict = Depends(current_user)) -> dict[str, Any]:
+def list_qg_nodes(user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_rule_read_permissions(user)
     return ok({"items": query_all("SELECT * FROM qg_nodes WHERE is_active = 1 ORDER BY sort_order")})
 
 
 @app.get("/api/v1/business-rule-versions")
-def list_rule_versions(qg_node_id: int | None = None, status: str | None = None, _: dict = Depends(current_user)) -> dict[str, Any]:
+def list_rule_versions(qg_node_id: int | None = None, status: str | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_rule_read_permissions(user)
     rows = query_all("SELECT * FROM business_rule_versions ORDER BY id DESC")
     if qg_node_id:
         rows = [row for row in rows if row["qg_node_id"] == qg_node_id]
@@ -522,7 +638,8 @@ def create_rule_version(payload: dict = Body(...), user: dict = Depends(current_
 
 
 @app.get("/api/v1/business-rule-versions/{version_id}")
-def get_rule_version(version_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
+def get_rule_version(version_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_rule_read_permissions(user)
     version = row_or_404("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,), "RULE_VERSION_NOT_FOUND", "规则版本不存在")
     rules = query_all("SELECT * FROM business_check_rules WHERE business_rule_version_id = ? ORDER BY sort_order", (version_id,))
     for rule in rules:
@@ -843,8 +960,12 @@ def run_mock_auto_check(item_id: int, execution_rule_snapshot: dict[str, Any]) -
 
 
 @app.get("/api/v1/inspection-tasks")
-def list_inspection_tasks(status: str | None = None, project_id: int | None = None, _: dict = Depends(current_user)) -> dict[str, Any]:
+def list_inspection_tasks(status: str | None = None, project_id: int | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_business_scope(user)
     rows = query_all("SELECT * FROM inspection_tasks ORDER BY id DESC")
+    rows = [row for row in rows if task_project_is_active(row)]
+    if not has_full_business_scope(user):
+        rows = [row for row in rows if task_in_business_scope(row, user)]
     if status:
         rows = [row for row in rows if row["status"] == status]
     if project_id:
@@ -853,8 +974,8 @@ def list_inspection_tasks(status: str | None = None, project_id: int | None = No
 
 
 @app.get("/api/v1/inspection-tasks/{task_id}")
-def get_inspection_task(task_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
-    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
+def get_inspection_task(task_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    task = require_task_scope(user, task_id)
     project = query_one("SELECT * FROM projects WHERE id = ?", (task["project_id"],))
     qg_node = query_one("SELECT * FROM qg_nodes WHERE id = ?", (task["qg_node_id"],))
     current_round = query_one(
@@ -874,8 +995,8 @@ def get_inspection_task(task_id: int, _: dict = Depends(current_user)) -> dict[s
 
 
 @app.get("/api/v1/inspection-tasks/{task_id}/current-round/items")
-def current_round_items(task_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
-    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
+def current_round_items(task_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    task = require_task_scope(user, task_id)
     round_row = row_or_404(
         "SELECT * FROM inspection_rounds WHERE inspection_task_id = ? AND round_no = ?",
         (task_id, task["current_round_no"]),
@@ -887,8 +1008,8 @@ def current_round_items(task_id: int, _: dict = Depends(current_user)) -> dict[s
 
 
 @app.get("/api/v1/inspection-items/{item_id}")
-def get_inspection_item(item_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
-    item = row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
+def get_inspection_item(item_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    item = require_item_scope(user, item_id)
     item["engineer_decisions"] = query_all("SELECT * FROM engineer_decisions WHERE inspection_item_id = ? ORDER BY id", (item_id,))
     item["auto_check_results"] = query_all("SELECT * FROM auto_check_results WHERE inspection_item_id = ? ORDER BY id", (item_id,))
     return ok(item)
@@ -897,7 +1018,7 @@ def get_inspection_item(item_id: int, _: dict = Depends(current_user)) -> dict[s
 @app.post("/api/v1/inspection-items/{item_id}/convert-to-manual")
 def convert_to_manual(item_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    item = row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
+    item = require_item_scope(user, item_id)
     ensure_item_mutable(item)
     execute("UPDATE inspection_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionItemStatus.MANUAL_REQUIRED, item_id))
     audit("convert_to_manual", "inspection_item", item_id, user["id"], payload)
@@ -907,7 +1028,7 @@ def convert_to_manual(item_id: int, payload: dict = Body(...), user: dict = Depe
 @app.post("/api/v1/inspection-items/{item_id}/confirm")
 def confirm_item(item_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    item = row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
+    item = require_item_scope(user, item_id)
     ensure_item_mutable(item)
     result = payload.get("decision_result")
     if result not in (InspectionResult.PASS, InspectionResult.FAIL, InspectionResult.CONDITIONAL, InspectionResult.NA):
@@ -955,7 +1076,7 @@ def ensure_item_mutable(item: dict[str, Any]) -> None:
 @app.post("/api/v1/inspection-tasks/{task_id}/archive-current-round")
 def archive_current_round(task_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
+    task = require_task_scope(user, task_id)
     if task["status"] != InspectionTaskStatus.RUNNING:
         raise BusinessError("INSPECTION_TASK_NOT_RUNNING", "当前任务不是进行中状态，无法归档")
     round_row = row_or_404(
@@ -1121,7 +1242,7 @@ def update_report(task_id: int, round_row: dict[str, Any], items: list[dict[str,
 @app.post("/api/v1/inspection-tasks/{task_id}/void")
 def void_task(task_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
+    task = require_task_scope(user, task_id)
     if task["status"] not in (InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING):
         raise BusinessError("TASK_CANNOT_BE_VOIDED", "当前状态不能作废")
     execute(
@@ -1133,8 +1254,9 @@ def void_task(task_id: int, payload: dict = Body(...), user: dict = Depends(curr
 
 
 @app.get("/api/v1/rectification-items")
-def list_rectifications(task_id: int | None = None, project_id: int | None = None, _: dict = Depends(current_user)) -> dict[str, Any]:
+def list_rectifications(task_id: int | None = None, project_id: int | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
     rows = query_all("SELECT * FROM rectification_items ORDER BY id")
+    rows = filter_task_scoped_rows(rows, user)
     if task_id:
         rows = [row for row in rows if row["inspection_task_id"] == task_id]
     if project_id:
@@ -1145,7 +1267,7 @@ def list_rectifications(task_id: int | None = None, project_id: int | None = Non
 @app.post("/api/v1/rectification-items/{rectification_id}/mark-done")
 def mark_rectification_done(rectification_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    row_or_404("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,), "RECTIFICATION_NOT_FOUND", "整改项不存在")
+    require_rectification_scope(user, rectification_id)
     with transaction():
         execute(
             "UPDATE rectification_items SET marked_done_by = ?, marked_done_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -1158,7 +1280,7 @@ def mark_rectification_done(rectification_id: int, user: dict = Depends(current_
 @app.post("/api/v1/rectification-items/{rectification_id}/undo-done")
 def undo_rectification_done(rectification_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    item = row_or_404("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,), "RECTIFICATION_NOT_FOUND", "整改项不存在")
+    item = require_rectification_scope(user, rectification_id)
     task = query_one("SELECT * FROM inspection_tasks WHERE id = ?", (item["inspection_task_id"],))
     if task["status"] != InspectionTaskStatus.RECTIFYING:
         raise BusinessError("RECTIFICATION_UNDO_FORBIDDEN", "复查触发后不能撤销整改完成")
@@ -1170,8 +1292,9 @@ def undo_rectification_done(rectification_id: int, user: dict = Depends(current_
 
 
 @app.get("/api/v1/followup-items")
-def list_followups(task_id: int | None = None, _: dict = Depends(current_user)) -> dict[str, Any]:
+def list_followups(task_id: int | None = None, user: dict = Depends(current_user)) -> dict[str, Any]:
     rows = query_all("SELECT * FROM followup_items ORDER BY id")
+    rows = filter_task_scoped_rows(rows, user)
     if task_id:
         rows = [row for row in rows if row["inspection_task_id"] == task_id]
     return ok({"items": rows})
@@ -1180,7 +1303,7 @@ def list_followups(task_id: int | None = None, _: dict = Depends(current_user)) 
 @app.post("/api/v1/followup-items/{followup_id}/close")
 def close_followup(followup_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    row_or_404("SELECT * FROM followup_items WHERE id = ?", (followup_id,), "FOLLOWUP_NOT_FOUND", "待跟进项不存在")
+    require_followup_scope(user, followup_id)
     execute("UPDATE followup_items SET closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"], followup_id))
     return ok(query_one("SELECT * FROM followup_items WHERE id = ?", (followup_id,)))
 
@@ -1188,7 +1311,7 @@ def close_followup(followup_id: int, user: dict = Depends(current_user)) -> dict
 @app.post("/api/v1/inspection-tasks/{task_id}/trigger-recheck")
 def trigger_recheck(task_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
-    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (task_id,), "TASK_NOT_FOUND", "点检任务不存在")
+    task = require_task_scope(user, task_id)
     if task["status"] != InspectionTaskStatus.RECTIFYING:
         raise BusinessError("TASK_NOT_RECTIFYING", "任务不在整改中，不能触发复查")
     current_round = row_or_404(
@@ -1237,9 +1360,11 @@ def list_reports(
     generated_by: int | None = None,
     generated_from: str | None = None,
     generated_to: str | None = None,
-    _: dict = Depends(current_user),
+    user: dict = Depends(current_user),
 ) -> dict[str, Any]:
+    require_business_scope(user)
     rows = query_all("SELECT * FROM inspection_reports ORDER BY id DESC")
+    rows = filter_task_scoped_rows(rows, user)
     if project_id:
         rows = [row for row in rows if row["project_id"] == project_id]
     if qg_node_id:
@@ -1256,8 +1381,8 @@ def list_reports(
 
 
 @app.get("/api/v1/reports/{report_id}")
-def get_report(report_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
-    report = row_or_404("SELECT * FROM inspection_reports WHERE id = ?", (report_id,), "REPORT_NOT_FOUND", "报告不存在")
+def get_report(report_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    report = require_report_scope(user, report_id)
     report["summary_json"] = from_json(report["summary_json"], {})
     report["project"] = query_one("SELECT * FROM projects WHERE id = ?", (report["project_id"],))
     report["qg_node"] = query_one("SELECT * FROM qg_nodes WHERE id = ?", (report["qg_node_id"],))
@@ -1283,8 +1408,8 @@ def list_audit_logs(user: dict = Depends(current_user)) -> dict[str, Any]:
 
 
 @app.get("/api/v1/inspection-items/{item_id}/auto-check-results")
-def list_auto_check_results(item_id: int, _: dict = Depends(current_user)) -> dict[str, Any]:
-    row_or_404("SELECT * FROM inspection_items WHERE id = ?", (item_id,), "ITEM_NOT_FOUND", "检查项不存在")
+def list_auto_check_results(item_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    require_item_scope(user, item_id)
     rows = query_all("SELECT * FROM auto_check_results WHERE inspection_item_id = ? ORDER BY attempt_no", (item_id,))
     for row in rows:
         row["execution_rule_snapshot"] = from_json(row["execution_rule_snapshot"], {})
