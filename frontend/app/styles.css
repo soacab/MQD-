@@ -2741,18 +2741,18 @@ tbody tr:hover {
 
 .archive-date-trigger {
   display: flex;
-  justify-content: space-between;
   gap: 10px;
   align-items: center;
   width: 100%;
 }
 
-.archive-date-trigger::before {
+.archive-date-trigger svg {
+  flex: 0 0 auto;
   color: #7c8798;
-  content: "□";
 }
 
 .archive-date-trigger::after {
+  margin-left: auto;
   color: #7c8798;
   content: "⌄";
 }
@@ -2769,16 +2769,23 @@ tbody tr:hover {
   right: 0;
   z-index: 20;
   display: grid;
-  width: min(420px, calc(100vw - 48px));
+  width: min(520px, calc(100vw - 48px));
   gap: 14px;
   border: 1px solid #dde4ef;
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px;
   background: #fff;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
 }
 
 .archive-date-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.archive-date-popover-head > div:first-child {
   display: grid;
   gap: 4px;
 }
@@ -2795,20 +2802,88 @@ tbody tr:hover {
   font-weight: 700;
 }
 
-.archive-date-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.archive-date-fields label {
-  display: grid;
+.archive-calendar-nav {
+  display: flex;
   gap: 6px;
 }
 
-.archive-date-fields input {
-  min-height: 38px;
-  padding: 7px 9px;
+.archive-calendar-nav button {
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  padding: 0;
+}
+
+.archive-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.archive-calendar-month h3 {
+  margin: 0 0 8px;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.archive-calendar-weekdays,
+.archive-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.archive-calendar-weekdays {
+  margin-bottom: 4px;
+}
+
+.archive-calendar-weekdays span {
+  min-height: 20px;
+  color: #7c8798;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.archive-calendar-empty,
+.archive-calendar-day {
+  min-height: 30px;
+}
+
+.archive-calendar-day {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  padding: 0;
+  background: transparent;
+  color: #4b5870;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.archive-calendar-day:hover {
+  background: #eef0ff;
+  color: #4f46e5;
+}
+
+.archive-calendar-day.in-range {
+  background: #eef0ff;
+  color: #4f46e5;
+  font-weight: 700;
+}
+
+.archive-calendar-day.selected {
+  background: #4f46e5;
+  color: #fff;
+  font-weight: 800;
 }
 
 .archive-date-actions {
@@ -3383,7 +3458,7 @@ tbody tr:hover {
   margin-bottom: 16px;
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1500px) {
   .archive-toolbar {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -3528,6 +3603,7 @@ tbody tr:hover {
   .model-row,
   .new-task-grid-2,
   .new-task-path-row,
+  .archive-calendar-grid,
   .archive-date-fields,
   .archive-order-head,
   .archive-order-row,

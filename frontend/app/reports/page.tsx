@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   addProjectOrder,
   deleteProject,
@@ -42,11 +43,47 @@ const emptyArchiveFilters = {
   page_size: "10"
 };
 
+const calendarWeekdays = ["一", "二", "三", "四", "五", "六", "日"];
+
 function formatDate(value?: string | null) {
   if (!value) {
     return "-";
   }
   return value.slice(0, 10);
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function toCalendarDateStr(date: Date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function monthLabel(date: Date) {
+  return `${date.getFullYear()} / ${padDatePart(date.getMonth() + 1)}`;
+}
+
+function monthCalendarDays(monthDate: Date) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  return Array.from({ length: totalCells }, (_, index) => {
+    const day = index - startOffset + 1;
+    if (day < 1 || day > daysInMonth) {
+      return { key: `empty-${year}-${month}-${index}` };
+    }
+    const date = new Date(year, month, day);
+    return {
+      key: toCalendarDateStr(date),
+      dateStr: toCalendarDateStr(date),
+      day
+    };
+  });
 }
 
 function resultLabel(value?: string | null) {
@@ -108,6 +145,16 @@ function dateRangeLabel(filters: { modified_from?: string; modified_to?: string 
   return "选择日期范围";
 }
 
+function pendingDateHint(from: string, to: string) {
+  if (from && to) {
+    return `${dateRangeLabel({ modified_from: from, modified_to: to })}，点击应用筛选`;
+  }
+  if (from) {
+    return `已选开始：${from.replaceAll("-", "/")}，再点结束日期`;
+  }
+  return "先点开始日期，再点结束日期";
+}
+
 function escapeExcelCell(value: unknown) {
   const text = String(value ?? "");
   const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
@@ -149,6 +196,12 @@ export default function ReportsPage() {
   const [addOrderForm, setAddOrderForm] = useState({ receive_date: "", models: "" });
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isDateRangeOpen, setDateRangeOpen] = useState(false);
+  const [pendingDateFrom, setPendingDateFrom] = useState("");
+  const [pendingDateTo, setPendingDateTo] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
 
   const canManageProjects = currentUser?.permissions.includes("project_admin");
@@ -159,6 +212,7 @@ export default function ReportsPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const reportItems = selectedReport?.items || [];
   const reportCounts = countReportResults(reportItems);
+  const calendarMonths = [calendarMonth, new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)];
 
   async function refresh(filters = archiveFilters) {
     try {
@@ -209,15 +263,68 @@ export default function ReportsPage() {
   async function handleResetDates() {
     const nextFilters = { ...archiveFilters, modified_from: "", modified_to: "", page: "1" };
     setArchiveFilters(nextFilters);
+    setPendingDateFrom("");
+    setPendingDateTo("");
     setDateRangeOpen(false);
     await refresh(nextFilters);
   }
 
   async function handleApplyDateRange() {
-    const nextFilters = { ...archiveFilters, page: "1" };
+    if (pendingDateFrom && !pendingDateTo) {
+      setMessage("请再选择结束日期");
+      return;
+    }
+    const nextFilters = {
+      ...archiveFilters,
+      modified_from: pendingDateFrom,
+      modified_to: pendingDateTo,
+      page: "1"
+    };
     setArchiveFilters(nextFilters);
     setDateRangeOpen(false);
     await refresh(nextFilters);
+  }
+
+  async function handleClearDateRange() {
+    setPendingDateFrom("");
+    setPendingDateTo("");
+    const nextFilters = { ...archiveFilters, modified_from: "", modified_to: "", page: "1" };
+    setArchiveFilters(nextFilters);
+    await refresh(nextFilters);
+  }
+
+  function handleToggleDateRange() {
+    setDateRangeOpen((open) => {
+      if (!open) {
+        setPendingDateFrom(archiveFilters.modified_from);
+        setPendingDateTo(archiveFilters.modified_to);
+        if (archiveFilters.modified_from) {
+          const [year, month] = archiveFilters.modified_from.split("-").map(Number);
+          if (year && month) {
+            setCalendarMonth(new Date(year, month - 1, 1));
+          }
+        }
+      }
+      return !open;
+    });
+  }
+
+  function shiftCalendarMonth(offset: number) {
+    setCalendarMonth((month) => new Date(month.getFullYear(), month.getMonth() + offset, 1));
+  }
+
+  function selectCalendarDate(dateStr: string) {
+    if (!pendingDateFrom || (pendingDateFrom && pendingDateTo)) {
+      setPendingDateFrom(dateStr);
+      setPendingDateTo("");
+      return;
+    }
+    if (dateStr < pendingDateFrom) {
+      setPendingDateFrom(dateStr);
+      setPendingDateTo(pendingDateFrom);
+      return;
+    }
+    setPendingDateTo(dateStr);
   }
 
   async function handleProjectDetail(projectId: number) {
@@ -379,38 +486,63 @@ export default function ReportsPage() {
             type="button"
             className="archive-date-trigger"
             aria-expanded={isDateRangeOpen}
-            onClick={() => setDateRangeOpen((open) => !open)}
+            onClick={handleToggleDateRange}
           >
+            <CalendarDays aria-hidden="true" size={16} />
             <span>{dateRangeLabel(archiveFilters)}</span>
           </button>
           {isDateRangeOpen ? (
             <div className="archive-date-popover" role="dialog" aria-label="选择报告修改时间范围">
               <div className="archive-date-popover-head">
-                <strong>选择报告修改时间范围</strong>
-                <span>先点开始日期，再点结束日期</span>
+                <div>
+                  <strong>选择报告修改时间范围</strong>
+                  <span>{pendingDateHint(pendingDateFrom, pendingDateTo)}</span>
+                </div>
+                <div className="archive-calendar-nav">
+                  <button type="button" aria-label="上一个月" onClick={() => shiftCalendarMonth(-1)}>
+                    <ChevronLeft aria-hidden="true" size={16} />
+                  </button>
+                  <button type="button" aria-label="下一个月" onClick={() => shiftCalendarMonth(1)}>
+                    <ChevronRight aria-hidden="true" size={16} />
+                  </button>
+                </div>
               </div>
-              <div className="archive-date-fields">
-                <label>
-                  开始日期
-                  <input
-                    aria-label="范围开始日期"
-                    type="date"
-                    value={archiveFilters.modified_from}
-                    onChange={(event) => setArchiveFilters({ ...archiveFilters, modified_from: event.target.value })}
-                  />
-                </label>
-                <label>
-                  结束日期
-                  <input
-                    aria-label="范围结束日期"
-                    type="date"
-                    value={archiveFilters.modified_to}
-                    onChange={(event) => setArchiveFilters({ ...archiveFilters, modified_to: event.target.value })}
-                  />
-                </label>
+              <div className="archive-calendar-grid">
+                {calendarMonths.map((month) => (
+                  <section className="archive-calendar-month" key={month.toISOString()} aria-label={monthLabel(month)}>
+                    <h3>{monthLabel(month)}</h3>
+                    <div className="archive-calendar-weekdays" aria-hidden="true">
+                      {calendarWeekdays.map((day) => (
+                        <span key={day}>{day}</span>
+                      ))}
+                    </div>
+                    <div className="archive-calendar-days">
+                      {monthCalendarDays(month).map((day) =>
+                        day.dateStr ? (
+                          <button
+                            type="button"
+                            key={day.key}
+                            className={
+                              day.dateStr === pendingDateFrom || day.dateStr === pendingDateTo
+                                ? "archive-calendar-day selected"
+                                : pendingDateFrom && pendingDateTo && day.dateStr > pendingDateFrom && day.dateStr < pendingDateTo
+                                  ? "archive-calendar-day in-range"
+                                  : "archive-calendar-day"
+                            }
+                            onClick={() => selectCalendarDate(day.dateStr)}
+                          >
+                            {day.day}
+                          </button>
+                        ) : (
+                          <span className="archive-calendar-empty" key={day.key} />
+                        )
+                      )}
+                    </div>
+                  </section>
+                ))}
               </div>
               <div className="archive-date-actions">
-                <button type="button" className="link-button" onClick={() => void handleResetDates()}>
+                <button type="button" className="link-button" onClick={() => void handleClearDateRange()}>
                   清空
                 </button>
                 <button type="button" className="secondary-button" onClick={() => setDateRangeOpen(false)}>
