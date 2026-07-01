@@ -35,6 +35,8 @@ const emptyForm = {
   permissions: ["inspection_engineer"]
 };
 
+type AdminSection = "users" | "settings";
+
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -44,6 +46,8 @@ export default function AdminPage() {
   const [permissionFilter, setPermissionFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [autoCheckEnabled, setAutoCheckEnabled] = useState(true);
+  const [activeSection, setActiveSection] = useState<AdminSection>("users");
+  const [showUserModal, setShowUserModal] = useState(false);
   const [message, setMessage] = useState("");
 
   const canManageAccounts = Boolean(currentUser?.permissions.includes("super_admin"));
@@ -53,7 +57,10 @@ export default function AdminPage() {
   async function refresh({ clearMessage = true }: { clearMessage?: boolean } = {}) {
     try {
       const me = await getCurrentUser();
+      const settings = await getSystemSettings();
       setCurrentUser(me);
+      setAutoCheckEnabled(Boolean(settings.auto_check_enabled));
+
       if (!me.permissions.includes("super_admin")) {
         setUsers([]);
         if (clearMessage) {
@@ -61,12 +68,9 @@ export default function AdminPage() {
         }
         return;
       }
-      const [userRows, settings] = await Promise.all([
-        listUsers({ keyword, permission: permissionFilter, status: statusFilter }),
-        getSystemSettings()
-      ]);
+
+      const userRows = await listUsers({ keyword, permission: permissionFilter, status: statusFilter });
       setUsers(userRows.items);
-      setAutoCheckEnabled(Boolean(settings.auto_check_enabled));
       if (clearMessage) {
         setMessage("");
       }
@@ -101,6 +105,18 @@ export default function AdminPage() {
     setEditingUserId(null);
   }
 
+  function closeUserModal() {
+    resetForm();
+    setShowUserModal(false);
+  }
+
+  function startCreate() {
+    resetForm();
+    setMessage("");
+    setActiveSection("users");
+    setShowUserModal(true);
+  }
+
   function startEdit(user: User) {
     setEditingUserId(user.id);
     setForm({
@@ -110,10 +126,16 @@ export default function AdminPage() {
       status: user.status,
       permissions: user.permissions
     });
+    setMessage("");
+    setShowUserModal(true);
   }
 
   function isCurrentUser(user: User) {
     return currentUser?.id === user.id;
+  }
+
+  function permissionLabel(permission: string) {
+    return permissionOptions.find((option) => option.key === permission)?.label || permission;
   }
 
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
@@ -158,7 +180,7 @@ export default function AdminPage() {
         });
         setMessage("账号已保存。");
       }
-      resetForm();
+      closeUserModal();
       await refresh({ clearMessage: false });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存账号失败");
@@ -205,7 +227,7 @@ export default function AdminPage() {
       await deleteUser(user.id);
       setMessage("UID 已删除。");
       if (editingUserId === user.id) {
-        resetForm();
+        closeUserModal();
       }
       await refresh({ clearMessage: false });
     } catch (error) {
@@ -229,192 +251,310 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="page">
-      <header className="page-header">
-        <p className="eyebrow">后台管理</p>
-        <h1>用户与权限 / 系统设置</h1>
-      </header>
-      {message ? <p className="notice">{message}</p> : null}
-      {!canManageAccounts ? <p className="notice">只读模式：仅权限管理员可编辑用户、权限和系统设置。</p> : null}
-      <p className="field-governance-note">
-        字段治理：后台仅展示方案 4.1 和原型确认的 UID、姓名、公司邮箱、用户权限、状态与自动检查开关；权限管理不默认获得点检、规则或项目管理能力。
-      </p>
-
-      <section className="admin-layout">
-        <nav className="admin-nav" aria-label="后台分区">
-          <a href="#accounts">用户与权限</a>
-          <a href="#settings">系统设置</a>
-        </nav>
-
-        <div className="admin-main">
-          <form id="accounts" className="form-panel" onSubmit={handleSaveUser}>
-          <h2>{editingUserId ? `编辑账号 · ${form.uid}` : "添加用户"}</h2>
-          <label>
-            UID
-            <input
-              name="uid"
-              value={form.uid}
-              onChange={(event) => updateFormField("uid", event.target.value)}
-              disabled={Boolean(editingUserId) || !canManageAccounts}
-              required
-            />
-          </label>
-          <label>
-            姓名
-            <input
-              name="name"
-              value={form.name}
-              onChange={(event) => updateFormField("name", event.target.value)}
-              disabled={!canManageAccounts}
-              required
-            />
-          </label>
-          <label>
-            公司邮箱
-            <input
-              name="email"
-              value={form.email}
-              onChange={(event) => updateFormField("email", event.target.value)}
-              disabled={!canManageAccounts}
-            />
-          </label>
-          <fieldset className="checkbox-group">
-            <legend>用户权限</legend>
-            {permissionOptions.map((permission) => (
-              <label className="inline" key={permission.key}>
-                <input
-                  type="checkbox"
-                  checked={form.permissions.includes(permission.key)}
-                  onChange={() => togglePermission(permission.key)}
-                  disabled={!canManageAccounts || (isEditingCurrentUser && permission.key === "super_admin")}
-                />
-                {permission.label}
-              </label>
-            ))}
-          </fieldset>
-          <label>
-            状态
-            <select
-              name="status"
-              value={form.status}
-              onChange={(event) => updateFormField("status", event.target.value)}
-              disabled={!canManageAccounts || isEditingCurrentUser}
+    <main className="account-page">
+      <section className="account-body">
+        <aside className="account-sidebar" aria-label="后台管理导航">
+          <div className="account-sidebar-title">
+            后台管理
+            <div className="account-sidebar-sub">账号权限与全局设置</div>
+          </div>
+          <nav className="account-side-nav">
+            <button
+              className={`account-nav-btn ${activeSection === "users" ? "active" : ""}`}
+              type="button"
+              onClick={() => setActiveSection("users")}
             >
-              <option value="active">启用</option>
-              <option value="disabled">停用</option>
-            </select>
-          </label>
-          <div className="button-row">
-            <button type="submit" disabled={!canManageAccounts}>
-              {editingUserId ? "完成" : "保存账号"}
+              用户与权限
             </button>
-            {editingUserId ? (
-              <button className="secondary-button" type="button" onClick={resetForm}>
+            <button
+              className={`account-nav-btn ${activeSection === "settings" ? "active" : ""}`}
+              type="button"
+              onClick={() => setActiveSection("settings")}
+            >
+              系统设置
+            </button>
+          </nav>
+        </aside>
+
+        <div className="account-content">
+          {message ? <p className="account-notice">{message}</p> : null}
+          <p className="field-governance-note">
+            字段治理：后台仅展示方案 4.1 和原型确认的 UID、姓名、公司邮箱、用户权限、状态与自动检查开关；权限管理不默认获得点检、规则或项目管理能力。
+          </p>
+
+          {activeSection === "users" ? (
+            <section className="account-view active" aria-label="用户与权限">
+              <div className="account-user-layout">
+                <section className="account-main">
+                  <div className="account-head">
+                    <div>
+                      <h1 className="account-title">用户与权限</h1>
+                      <div className="account-sub">共 {users.length} 个账号 · 启用 {activeCount} 个</div>
+                      {!canManageAccounts ? (
+                        <div className="account-readonly-note">只读模式：仅权限管理员可编辑用户和权限</div>
+                      ) : null}
+                    </div>
+                    <div className="account-filters">
+                      <input
+                        id="account-search"
+                        className="account-control"
+                        aria-label="搜索 UID、姓名、邮箱"
+                        placeholder="搜索 UID / 姓名 / 邮箱"
+                        value={keyword}
+                        onChange={(event) => setKeyword(event.target.value)}
+                      />
+                      <select
+                        id="account-permission-filter"
+                        className="account-control"
+                        aria-label="权限筛选"
+                        value={permissionFilter}
+                        onChange={(event) => setPermissionFilter(event.target.value)}
+                      >
+                        <option value="">全部权限</option>
+                        {permissionOptions.map((permission) => (
+                          <option key={permission.key} value={permission.key}>
+                            {permission.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        id="account-status-filter"
+                        className="account-control"
+                        aria-label="状态筛选"
+                        value={statusFilter}
+                        onChange={(event) => setStatusFilter(event.target.value)}
+                      >
+                        <option value="">全部状态</option>
+                        <option value="active">启用</option>
+                        <option value="disabled">停用</option>
+                      </select>
+                      <button className="account-primary-button" type="button" onClick={startCreate} disabled={!canManageAccounts}>
+                        添加用户
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="account-table-wrap">
+                    <table className="account-table">
+                      <thead>
+                        <tr>
+                          <th>UID</th>
+                          <th>姓名</th>
+                          <th>公司邮箱</th>
+                          <th>权限</th>
+                          <th>状态</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {users.length ? (
+                          users.map((item) => (
+                            <tr key={item.id}>
+                              <td>
+                                <span className="account-name">{item.uid}</span>
+                              </td>
+                              <td>{item.name}</td>
+                              <td className="account-email">{item.email || "-"}</td>
+                              <td>
+                                <div className="account-permissions">
+                                  {item.permissions.map((permission) => (
+                                    <span className={`account-permission-chip ${permission}`} key={permission}>
+                                      {permissionLabel(permission)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`account-status ${item.status}`}>{statusLabels[item.status] || item.status}</span>
+                              </td>
+                              <td>
+                                <div className="account-action-row">
+                                  <button className="account-action" type="button" onClick={() => startEdit(item)} disabled={!canManageAccounts}>
+                                    编辑
+                                  </button>
+                                  <button
+                                    className={`account-action ${item.status === "active" ? "warn" : ""}`}
+                                    type="button"
+                                    onClick={() => handleToggleStatus(item)}
+                                    disabled={!canManageAccounts || isCurrentUser(item)}
+                                  >
+                                    {item.status === "active" ? "停用" : "启用"}
+                                  </button>
+                                  <button
+                                    className="account-action danger"
+                                    type="button"
+                                    onClick={() => handleDelete(item)}
+                                    disabled={!canManageAccounts || isCurrentUser(item)}
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td className="account-empty" colSpan={6}>
+                              没有符合条件的账号
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <aside className="permission-list" aria-label="权限说明">
+                  <div className="permission-list-title">权限说明</div>
+                  {permissionOptions.map((permission) => (
+                    <div className="permission-row" key={permission.key}>
+                      <div className={`permission-role ${permission.key}`}>{permission.label}</div>
+                      <div className="permission-text">{permission.description}</div>
+                    </div>
+                  ))}
+                </aside>
+              </div>
+            </section>
+          ) : (
+            <section className="account-view active" aria-label="系统设置">
+              <section className="account-panel">
+                <div className="account-head account-head-plain">
+                  <div>
+                    <h1 className="account-title">系统设置</h1>
+                    <div className="account-sub">所有用户可查看，只有权限管理员可保存修改。</div>
+                    {!canManageAccounts ? (
+                      <div className="account-readonly-note">只读模式：仅权限管理员可保存系统设置</div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <form className="backend-settings" onSubmit={handleSaveSetting}>
+                  <label className="backend-setting-card">
+                    <span>
+                      <span className="backend-settings-title">自动检查开关</span>
+                      <span className="backend-settings-copy">开启后，系统允许自动执行检查流程。</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={autoCheckEnabled}
+                      onChange={(event) => setAutoCheckEnabled(event.target.checked)}
+                      disabled={!canManageAccounts}
+                    />
+                  </label>
+                  <button className="account-primary-button settings-save-button" type="submit" disabled={!canManageAccounts}>
+                    保存设置
+                  </button>
+                </form>
+              </section>
+            </section>
+          )}
+        </div>
+      </section>
+
+      {showUserModal ? (
+        <div className="account-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeUserModal()}>
+          <form className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-form-title" onSubmit={handleSaveUser}>
+            <header className="account-modal-header">
+              <div>
+                <h2 id="account-form-title">{editingUserId ? `编辑账号 · ${form.uid}` : "添加用户"}</h2>
+                <p>账号权限在 CheckFlow 内维护，变更后下次登录生效。</p>
+              </div>
+              <button className="account-modal-close" type="button" onClick={closeUserModal} aria-label="关闭">
+                x
+              </button>
+            </header>
+
+            <div className="account-modal-body">
+              <label className="account-form-field">
+                <span>姓名 <strong>*</strong></span>
+                <input
+                  name="name"
+                  value={form.name}
+                  onChange={(event) => updateFormField("name", event.target.value)}
+                  disabled={!canManageAccounts}
+                  placeholder="请输入姓名"
+                  required
+                />
+              </label>
+              <label className="account-form-field">
+                <span>UID <strong>*</strong></span>
+                <input
+                  name="uid"
+                  value={form.uid}
+                  onChange={(event) => updateFormField("uid", event.target.value)}
+                  disabled={Boolean(editingUserId) || !canManageAccounts}
+                  placeholder="如 UID02322"
+                  required
+                />
+              </label>
+              <label className="account-form-field">
+                <span>公司邮箱</span>
+                <input
+                  name="email"
+                  value={form.email}
+                  onChange={(event) => updateFormField("email", event.target.value)}
+                  disabled={!canManageAccounts}
+                  placeholder="如 uid02322@company.com"
+                />
+              </label>
+
+              <fieldset className="account-form-field">
+                <legend>用户权限</legend>
+                <div className="account-permission-checks">
+                  {permissionOptions.map((permission) => (
+                    <label className="account-check" key={permission.key}>
+                      <input
+                        type="checkbox"
+                        checked={form.permissions.includes(permission.key)}
+                        onChange={() => togglePermission(permission.key)}
+                        disabled={!canManageAccounts || (isEditingCurrentUser && permission.key === "super_admin")}
+                      />
+                      {permission.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="account-form-field">
+                <legend>状态</legend>
+                <div className="account-status-radios">
+                  <label className="account-radio">
+                    <input
+                      type="radio"
+                      name="account-status"
+                      value="active"
+                      checked={form.status === "active"}
+                      onChange={(event) => updateFormField("status", event.target.value)}
+                      disabled={!canManageAccounts || isEditingCurrentUser}
+                    />
+                    启用
+                  </label>
+                  <label className="account-radio">
+                    <input
+                      type="radio"
+                      name="account-status"
+                      value="disabled"
+                      checked={form.status === "disabled"}
+                      onChange={(event) => updateFormField("status", event.target.value)}
+                      disabled={!canManageAccounts || isEditingCurrentUser}
+                    />
+                    停用
+                  </label>
+                </div>
+              </fieldset>
+            </div>
+
+            <footer className="account-modal-footer">
+              <button className="account-secondary-button" type="button" onClick={closeUserModal}>
                 取消
               </button>
-            ) : null}
-          </div>
-        </form>
-
-        <form id="settings" className="form-panel" onSubmit={handleSaveSetting}>
-          <h2>系统设置</h2>
-          <label className="inline">
-            <input
-              type="checkbox"
-              checked={autoCheckEnabled}
-              onChange={(event) => setAutoCheckEnabled(event.target.checked)}
-              disabled={!canManageAccounts}
-            />
-            启用自动检查
-          </label>
-          <button type="submit" disabled={!canManageAccounts}>
-            保存设置
-          </button>
-        </form>
-
-      <section className="module spaced">
-        <div className="section-heading">
-          <div>
-            <h2>账号列表</h2>
-            <p>共 {users.length} 个账号 · 启用 {activeCount} 个</p>
-          </div>
-          <div className="filters">
-            <input
-              aria-label="搜索 UID、姓名、邮箱"
-              placeholder="搜索 UID / 姓名 / 邮箱"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-            />
-            <select
-              aria-label="权限筛选"
-              value={permissionFilter}
-              onChange={(event) => setPermissionFilter(event.target.value)}
-            >
-              <option value="">全部权限</option>
-              {permissionOptions.map((permission) => (
-                <option key={permission.key} value={permission.key}>
-                  {permission.label}
-                </option>
-              ))}
-            </select>
-            <select aria-label="状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="">全部状态</option>
-              <option value="active">启用</option>
-              <option value="disabled">停用</option>
-            </select>
-          </div>
+              <button className="account-primary-button" type="submit" disabled={!canManageAccounts}>
+                保存用户
+              </button>
+            </footer>
+          </form>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>UID</th>
-              <th>姓名</th>
-              <th>公司邮箱</th>
-              <th>权限</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((item) => (
-              <tr key={item.id}>
-                <td>{item.uid}</td>
-                <td>{item.name}</td>
-                <td>{item.email || "-"}</td>
-                <td>{item.permissions.map((permission) => permissionOptions.find((option) => option.key === permission)?.label || permission).join(" / ")}</td>
-                <td>{statusLabels[item.status] || item.status}</td>
-                <td>
-                  <div className="button-row">
-                    <button className="secondary-button" type="button" onClick={() => startEdit(item)} disabled={!canManageAccounts}>
-                      编辑
-                    </button>
-                    <button className="secondary-button" type="button" onClick={() => handleToggleStatus(item)} disabled={!canManageAccounts || isCurrentUser(item)}>
-                      {item.status === "active" ? "停用" : "启用"}
-                    </button>
-                    <button className="danger-button" type="button" onClick={() => handleDelete(item)} disabled={!canManageAccounts || isCurrentUser(item)}>
-                      删除
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-        </div>
-
-      <aside className="module spaced">
-        <h2>权限说明</h2>
-        <div className="permission-grid">
-          {permissionOptions.map((permission) => (
-            <div key={permission.key}>
-              <strong>{permission.label}</strong>
-              <p>{permission.description}</p>
-            </div>
-          ))}
-        </div>
-      </aside>
-      </section>
+      ) : null}
     </main>
   );
 }

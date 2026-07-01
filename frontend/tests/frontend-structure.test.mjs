@@ -94,9 +94,15 @@ describe("frontend structure", () => {
         "权限管理",
         "只读模式",
         "确认删除 UID",
-        "admin-layout",
-        "admin-nav",
-        "用户与权限 / 系统设置",
+        "account-body",
+        "account-sidebar",
+        "account-user-layout",
+        "account-table",
+        "permission-list",
+        "account-modal",
+        "activeSection",
+        "showUserModal",
+        "添加用户",
         "type=\"checkbox\""
       ],
       "app/projects/page.tsx": ["use client", "listProjects(", "updateProject(", "updateProjectVdrive(", "addProjectOrder(", "deleteProject("],
@@ -139,7 +145,11 @@ describe("frontend structure", () => {
       "不能停用当前登录账号",
       "不能删除当前登录账号",
       "不能取消自己的权限管理权限",
-      "disabled={!canManageAccounts || isCurrentUser(item)}"
+      "disabled={!canManageAccounts || isCurrentUser(item)}",
+      "account-readonly-note",
+      "account-permission-filter",
+      "account-status-filter",
+      "account-status-radios"
     ]) {
       assert.match(adminPage, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `admin page should contain ${snippet}`);
     }
