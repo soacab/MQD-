@@ -263,7 +263,7 @@ describe("frontend structure", () => {
       "确认发布规则版本",
       "当前版本",
       "新增人工检查项",
-      "继续编辑未发布规则变更"
+      "未发布规则变更"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
@@ -290,7 +290,7 @@ describe("frontend structure", () => {
       "published_rule_count",
       "draftVersion",
       "canManageRules && draftVersion",
-      "继续编辑草稿"
+      "有未发布的修改"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should keep ${snippet}`);
     }
@@ -566,6 +566,11 @@ describe("frontend structure", () => {
     assert.match(rulesPage, /checkflow:rules-open-history/, "rules page should respond to topbar history action");
     assert.match(rulesPage, /checkflow:rules-open-publish/, "rules page should respond to topbar publish action");
     assert.doesNotMatch(rulesPage, /rules-header-actions/, "rules page should not keep duplicate page-header rule actions");
+    assert.doesNotMatch(rulesPage, /继续编辑草稿|continueDraftVersion/, "rules page should not expose a separate continue-draft action");
+    assert.match(rulesPage, /const \[publishTargetVersion/, "rules page should keep publish target separate from the displayed version");
+    assert.match(rulesPage, /canPublish: canManageRules && Boolean\(draftVersion\)/, "rules publish action should be enabled when a draft exists");
+    assert.match(rulesPage, /getRuleVersion\(draftVersion\.id\)/, "rules publish action should load draft details without switching the table");
+    assert.match(rulesPage, /publishRuleVersion\(\s*publishTargetVersion\.id/, "rules publish action should publish the selected draft target");
 
     for (const snippet of [
       "--cf-bg-base",

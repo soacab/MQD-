@@ -133,6 +133,7 @@ export default function RulesPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<number | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [publishTargetVersion, setPublishTargetVersion] = useState<RuleVersion | null>(null);
   const [publishSummary, setPublishSummary] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
   const [message, setMessage] = useState("");
@@ -143,11 +144,10 @@ export default function RulesPage() {
   const autoRules = rules.filter((rule) => rule.item_type === "auto" || rule.item_type === "system");
   const manualRules = rules.filter((rule) => rule.item_type === "manual" || rule.item_type === "inherit");
   const visibleRules = activeTab === "auto" ? autoRules : manualRules;
-  const isDraft = selectedVersion?.status === "draft";
   const draftVersion = versions.find((version) => version.status === "draft") || null;
 
   const draftChangeDetails =
-    selectedVersion?.business_check_rules?.map((rule) => ({
+    publishTargetVersion?.business_check_rules?.map((rule) => ({
       item_name: rule.item_name,
       item_type: rule.item_type,
       change_type: asBoolean(rule.is_active) ? "added" : "disabled"
@@ -158,7 +158,7 @@ export default function RulesPage() {
       return "请选择规则版本";
     }
     if (selectedVersion.status === "draft") {
-      return `继续编辑未发布规则变更 · 共 ${rules.length} 条`;
+      return `未发布规则变更 · 共 ${rules.length} 条`;
     }
     return `生效于 ${formatDate(selectedVersion.published_at)} · ${selectedVersion.published_by_name || "-"} · 共 ${rules.length} 条`;
   }, [rules.length, selectedVersion]);
@@ -167,12 +167,12 @@ export default function RulesPage() {
     window.dispatchEvent(
       new CustomEvent("checkflow:rules-actions-state", {
         detail: {
-          canPublish: canManageRules && isDraft,
+          canPublish: canManageRules && Boolean(draftVersion),
           isPublishing
         }
       })
     );
-  }, [canManageRules, isDraft, isPublishing]);
+  }, [canManageRules, draftVersion, isPublishing]);
 
   useEffect(() => {
     function openHistoryFromTopbar() {
@@ -180,10 +180,7 @@ export default function RulesPage() {
     }
 
     function openPublishFromTopbar() {
-      if (!canManageRules || !isDraft || isPublishing) {
-        return;
-      }
-      setPublishOpen(true);
+      void openPublishModal();
     }
 
     window.addEventListener("checkflow:rules-open-history", openHistoryFromTopbar);
@@ -192,7 +189,7 @@ export default function RulesPage() {
       window.removeEventListener("checkflow:rules-open-history", openHistoryFromTopbar);
       window.removeEventListener("checkflow:rules-open-publish", openPublishFromTopbar);
     };
-  }, [canManageRules, isDraft, isPublishing]);
+  }, [canManageRules, draftVersion, isPublishing, selectedVersion]);
 
   async function loadNode(qgNodeId: number, preferredVersionId?: number) {
     const versionRows = await listRuleVersions(qgNodeId);
@@ -263,14 +260,17 @@ export default function RulesPage() {
     return { version: draft, rule: copiedRule };
   }
 
-  async function continueDraftVersion() {
-    if (!selectedNodeId || !draftVersion) {
+  async function openPublishModal() {
+    if (!canManageRules || !draftVersion || isPublishing) {
       return;
     }
     try {
-      setActiveTab("auto");
-      await loadNode(selectedNodeId, draftVersion.id);
-      setMessage("正在编辑未发布草稿，发布后才会影响新建任务。");
+      const target =
+        selectedVersion?.status === "draft" && selectedVersion.id === draftVersion.id
+          ? selectedVersion
+          : await getRuleVersion(draftVersion.id);
+      setPublishTargetVersion(target);
+      setPublishOpen(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "草稿版本加载失败");
     }
@@ -372,7 +372,7 @@ export default function RulesPage() {
     if (isPublishing) {
       return;
     }
-    if (!selectedVersion || selectedVersion.status !== "draft") {
+    if (!publishTargetVersion) {
       setMessage("当前没有未发布规则变更。");
       setPublishOpen(false);
       return;
@@ -381,10 +381,11 @@ export default function RulesPage() {
       setIsPublishing(true);
       const trimmedSummary = publishSummary.trim();
       const version = await publishRuleVersion(
-        selectedVersion.id,
+        publishTargetVersion.id,
         trimmedSummary ? { change_summary: trimmedSummary } : {}
       );
       setPublishOpen(false);
+      setPublishTargetVersion(null);
       setPublishSummary("");
       try {
         await loadNode(version.qg_node_id, version.id);
@@ -431,10 +432,7 @@ export default function RulesPage() {
               <p>{selectedVersionMeta}</p>
               {canManageRules && draftVersion && selectedVersion?.id !== draftVersion.id ? (
                 <p className="rules-draft-note">
-                  存在未发布草稿 {draftVersion.version_no}
-                  <button type="button" className="link-button" onClick={() => void continueDraftVersion()}>
-                    继续编辑草稿
-                  </button>
+                  有未发布的修改 {draftVersion.version_no}
                 </p>
               ) : null}
             </div>
@@ -586,9 +584,9 @@ export default function RulesPage() {
           <section className="rules-modal">
             <header>
               <h2>发布规则版本</h2>
-              <button type="button" onClick={() => setPublishOpen(false)}>×</button>
+              <button type="button" onClick={() => { setPublishOpen(false); setPublishTargetVersion(null); }}>×</button>
             </header>
-            <p>发布后新建任务将使用 {selectedNode?.node_code} {selectedVersion?.version_no}，进行中任务不受影响。</p>
+            <p>发布后新建任务将使用 {selectedNode?.node_code} {publishTargetVersion?.version_no}，进行中任务不受影响。</p>
             <ul className="plain-list">
               {draftChangeDetails.map((item, index) => (
                 <li key={`${item.item_name}-${item.change_type}-${index}`}>{formatRuleChangeLine(item)}</li>
@@ -602,7 +600,7 @@ export default function RulesPage() {
               <button type="button" disabled={isPublishing} onClick={() => void confirmPublish()}>
                 {isPublishing ? "发布中..." : "确认发布规则版本"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => setPublishOpen(false)}>取消</button>
+              <button type="button" className="secondary-button" onClick={() => { setPublishOpen(false); setPublishTargetVersion(null); }}>取消</button>
             </footer>
           </section>
         </div>

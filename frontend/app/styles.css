@@ -2430,13 +2430,6 @@ tbody tr:hover {
   margin-top: 8px !important;
 }
 
-.rules-draft-note .link-button {
-  min-height: 0;
-  padding: 0;
-  background: transparent;
-  color: #543fe8;
-}
-
 .rules-title-row {
   flex-wrap: wrap;
 }
