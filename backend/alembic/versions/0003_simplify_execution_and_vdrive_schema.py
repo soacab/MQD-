@@ -6,6 +6,7 @@ Create Date: 2026-07-01
 """
 
 from alembic import op
+from sqlalchemy import inspect
 
 
 revision = "0003_simplify_execution_and_vdrive_schema"
@@ -27,8 +28,8 @@ def _upgrade_sqlite() -> None:
     op.execute("DROP TABLE IF EXISTS vdrive_files")
     op.execute("DROP TABLE IF EXISTS vdrive_folders")
     op.execute("DROP TABLE IF EXISTS vdrive_scan_batches")
-    op.execute("ALTER TABLE qg_nodes DROP COLUMN created_at")
-    op.execute("ALTER TABLE qg_nodes DROP COLUMN updated_at")
+    _drop_column_if_exists("qg_nodes", "created_at")
+    _drop_column_if_exists("qg_nodes", "updated_at")
 
     op.execute(
         """
@@ -103,13 +104,36 @@ def _upgrade_postgresql() -> None:
     op.execute("DROP TABLE IF EXISTS vdrive_files")
     op.execute("DROP TABLE IF EXISTS vdrive_folders")
     op.execute("DROP TABLE IF EXISTS vdrive_scan_batches")
-    op.execute("ALTER TABLE qg_nodes DROP COLUMN created_at")
-    op.execute("ALTER TABLE qg_nodes DROP COLUMN updated_at")
-    op.execute("ALTER TABLE business_check_rules DROP COLUMN qg_node_id")
+    _drop_column_if_exists("qg_nodes", "created_at")
+    _drop_column_if_exists("qg_nodes", "updated_at")
+    _drop_column_if_exists("business_check_rules", "qg_node_id")
     op.execute("ALTER TABLE auto_check_execution_rules DROP CONSTRAINT IF EXISTS auto_check_execution_rules_business_check_rule_id_execution_code_key")
-    op.execute("ALTER TABLE auto_check_execution_rules DROP COLUMN execution_code")
-    op.execute("ALTER TABLE auto_check_execution_rules DROP COLUMN config_version")
-    op.execute("ALTER TABLE auto_check_execution_rules ADD UNIQUE (business_check_rule_id)")
+    _drop_column_if_exists("auto_check_execution_rules", "execution_code")
+    _drop_column_if_exists("auto_check_execution_rules", "config_version")
+    if not _unique_constraint_exists("auto_check_execution_rules", ["business_check_rule_id"]):
+        op.create_unique_constraint(
+            "uq_auto_check_execution_rules_business_check_rule_id",
+            "auto_check_execution_rules",
+            ["business_check_rule_id"],
+        )
+
+
+def _drop_column_if_exists(table_name: str, column_name: str) -> None:
+    if _column_exists(table_name, column_name):
+        op.drop_column(table_name, column_name)
+
+
+def _column_exists(table_name: str, column_name: str) -> bool:
+    inspector = inspect(op.get_bind())
+    return any(column["name"] == column_name for column in inspector.get_columns(table_name))
+
+
+def _unique_constraint_exists(table_name: str, column_names: list[str]) -> bool:
+    inspector = inspect(op.get_bind())
+    return any(
+        constraint.get("column_names") == column_names
+        for constraint in inspector.get_unique_constraints(table_name)
+    )
 
 
 def downgrade() -> None:
