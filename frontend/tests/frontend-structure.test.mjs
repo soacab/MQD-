@@ -386,6 +386,7 @@ describe("frontend structure", () => {
   it("aligns reports page with the inspection archive project list", () => {
     const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
     const reportsPage = readFileSync(resolve(root, "app/reports/page.tsx"), "utf8");
+    const rulesPage = readFileSync(resolve(root, "app/rules/page.tsx"), "utf8");
     const styles = readFileSync(resolve(root, "app/styles.css"), "utf8");
 
     for (const snippet of [
@@ -447,6 +448,7 @@ describe("frontend structure", () => {
     }
 
     assert.doesNotMatch(reportsPage, /field-governance-note/, "reports page should not show internal field governance copy");
+    assert.doesNotMatch(rulesPage, /field-governance-note/, "rules page should not show internal field governance copy");
     assert.doesNotMatch(reportsPage, /删除项目/, "reports page should use void-hide copy instead of delete copy");
     assert.doesNotMatch(reportsPage, /className="archive-date-range"/, "reports page should use one range picker trigger instead of two toolbar date inputs");
     assert.doesNotMatch(reportsPage, /aria-label="报告修改开始日期"/, "reports page should not expose a split start date input in the toolbar");
@@ -585,5 +587,6 @@ describe("frontend structure", () => {
     assert.doesNotMatch(homePage, /label: "待整改"/, "home page should fold rectification todos into the recheck section");
     assert.match(inspectionPage, /inspector-workspace/, "inspection page should use a three-panel execution workspace");
     assert.doesNotMatch(reportsPage, /field-governance-note/, "reports page should keep internal field governance out of the archive UI");
+    assert.doesNotMatch(rulesPage, /field-governance-note/, "rules page should keep internal field governance out of the rule config UI");
   });
 });
