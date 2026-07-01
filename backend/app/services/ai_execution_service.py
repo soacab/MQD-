@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.core.database import execute, to_json
-from app.core.enums import AdapterType, AutoCheckStatus, InspectionItemStatus, InspectionResult
+from app.core.enums import AdapterType, AutoCheckResult, AutoCheckStatus, InspectionItemStatus
 
 
 def run_mock_auto_check(item_id: int, execution_rule_snapshot: dict[str, Any]) -> None:
@@ -16,7 +16,7 @@ def run_mock_auto_check(item_id: int, execution_rule_snapshot: dict[str, Any]) -
         (
             item_id,
             AutoCheckStatus.SUCCESS,
-            InspectionResult.PASS,
+            AutoCheckResult.PASS,
             "Mock adapter found matching evidence; engineer confirmation is still required.",
             execution_rule_snapshot.get("adapter_type", AdapterType.MOCK),
             to_json(execution_rule_snapshot),

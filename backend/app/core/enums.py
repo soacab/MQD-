@@ -46,6 +46,8 @@ class InspectionRoundStatus(StrEnum):
 
 class InspectionItemStatus(StrEnum):
     PENDING = "pending"
+    CHECKING = "checking"
+    CANDIDATE_WAITING = "candidate_waiting"
     MANUAL_REQUIRED = "manual_required"
     AUTO_COMPLETED = "auto_completed"
     CONFIRMED = "confirmed"
@@ -68,6 +70,18 @@ class ReportOverallResult(StrEnum):
 
 class AutoCheckStatus(StrEnum):
     SUCCESS = "success"
+    FAILED = "failed"
+    CANDIDATE_WAITING = "candidate_waiting"
+    MANUAL_REQUIRED = "manual_required"
+
+
+class AutoCheckResult(StrEnum):
+    PASS = "pass"
+    FAIL = "fail"
+    NOT_FOUND = "not_found"
+    SUSPECT = "suspect"
+    MANUAL_REQUIRED = "manual_required"
+    ERROR = "error"
 
 
 class AutoExecutionMode(StrEnum):
