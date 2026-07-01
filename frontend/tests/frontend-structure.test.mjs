@@ -31,6 +31,7 @@ describe("frontend structure", () => {
 
     const endpoints = [
       "/api/v1/auth/login",
+      "/api/v1/auth/iam/login-url",
       "/api/v1/auth/me",
       "/api/v1/users",
       "/api/v1/system-settings",
@@ -89,12 +90,13 @@ describe("frontend structure", () => {
       "app/login/page.tsx": [
         "use client",
         "login(",
+        "getIamLoginUrl(",
         "saveSession",
         "login-shell",
         "登录工作台",
-        "UID00001",
         "记住本次身份",
         "登录进入",
+        "公司 SSO 登录",
         "login-toast"
       ],
       "app/admin/page.tsx": [
@@ -132,6 +134,9 @@ describe("frontend structure", () => {
 
     const loginPage = readFileSync(resolve(root, "app/login/page.tsx"), "utf8");
     assert.doesNotMatch(loginPage, /field-governance-note/, "login page should not show internal field governance copy");
+    assert.doesNotMatch(loginPage, /useState\("UID00001"\)/, "login page should not prefill a demo UID");
+    assert.doesNotMatch(loginPage, /useState\("admin"\)/, "login page should not prefill a demo password");
+    assert.doesNotMatch(loginPage, /默认账号|默认密码|admin\/admin/, "login page should not expose default credentials");
     assert.match(loginPage, /window\.location\.href = "\/"/, "login page should redirect to workbench after login");
     for (const snippet of ["login-session", "当前会话", "进入工作台", "退出登录"]) {
       assert.doesNotMatch(loginPage, new RegExp(snippet), `login page should not expose ${snippet}`);

@@ -14,6 +14,16 @@ def login(payload: dict = Body(...)) -> dict[str, Any]:
     return ok(auth_service.login(payload))
 
 
+@router.get("/api/v1/auth/iam/login-url")
+def iam_login_url(state: str | None = None) -> dict[str, Any]:
+    return ok(auth_service.iam_login_url(state))
+
+
+@router.get("/api/v1/auth/iam/callback")
+def iam_callback(code: str | None = None, state: str | None = None) -> dict[str, Any]:
+    return ok(auth_service.iam_callback(code, state))
+
+
 @router.get("/api/v1/auth/me")
 def me(user: dict = Depends(current_user)) -> dict[str, Any]:
     return ok(auth_service.serialize_user(user))

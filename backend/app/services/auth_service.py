@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import jwt
 
@@ -15,6 +17,15 @@ from app.services.permission_service import (
     require_editable_user,
     require_permissions,
 )
+
+
+def issue_checkflow_token(user: dict[str, Any]) -> dict[str, Any]:
+    token = jwt.encode(
+        {"sub": str(user["id"]), "exp": datetime.now(timezone.utc) + timedelta(seconds=7200)},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    return {"access_token": token, "token_type": "Bearer", "expires_in": 7200, "user": serialize_user(user)}
 
 
 def serialize_user(user: dict[str, Any]) -> dict[str, Any]:
@@ -41,17 +52,83 @@ def serialize_business_user_option(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def login(payload: dict[str, Any]) -> dict[str, Any]:
+    if settings.is_production or settings.auth_mode != "local":
+        raise BusinessError("LOCAL_AUTH_DISABLED", "本地账号密码登录仅允许开发环境使用", 401)
     user = query_one("SELECT * FROM users WHERE uid = ?", (payload.get("uid"),))
     if not user or user["status"] != UserStatus.ACTIVE:
         raise BusinessError("INVALID_UID", "UID 不存在或已停用", 401)
     if payload.get("password") not in (user["uid"], "admin"):
         raise BusinessError("INVALID_PASSWORD", "密码无效", 401)
-    token = jwt.encode(
-        {"sub": str(user["id"]), "exp": datetime.now(timezone.utc) + timedelta(seconds=7200)},
-        settings.jwt_secret,
-        algorithm=settings.jwt_algorithm,
-    )
-    return {"access_token": token, "token_type": "Bearer", "expires_in": 7200, "user": serialize_user(user)}
+    return issue_checkflow_token(user)
+
+
+def iam_login_url(state: str | None = None) -> dict[str, str]:
+    if not settings.iam_authorize_url or not settings.iam_client_id or not settings.iam_redirect_uri:
+        raise BusinessError("IAM_NOT_CONFIGURED", "IAM 登录配置不完整", 500)
+    params = {
+        "client_id": settings.iam_client_id,
+        "response_type": "code",
+        "redirect_uri": settings.iam_redirect_uri,
+    }
+    if state:
+        params["state"] = state
+    return {"login_url": f"{settings.iam_authorize_url}?{urlencode(params)}"}
+
+
+def exchange_iam_code_for_token(code: str) -> dict[str, Any]:
+    if not settings.iam_token_url or not settings.iam_client_id or not settings.iam_client_secret or not settings.iam_redirect_uri:
+        raise RuntimeError("IAM token configuration is incomplete.")
+    params = {
+        "grant_type": "authorization_code",
+        "client_id": settings.iam_client_id,
+        "client_secret": settings.iam_client_secret,
+        "code": code,
+        "redirect_uri": settings.iam_redirect_uri,
+        "oauth_timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+    request = Request(f"{settings.iam_token_url}?{urlencode(params)}", method="POST")
+    with urlopen(request, timeout=10) as response:
+        import json
+
+        return json.loads(response.read().decode("utf-8"))
+
+
+def fetch_iam_profile(access_token: str) -> dict[str, Any]:
+    if not settings.iam_profile_url:
+        raise RuntimeError("IAM profile configuration is incomplete.")
+    request = Request(f"{settings.iam_profile_url}?{urlencode({'access_token': access_token})}", method="GET")
+    with urlopen(request, timeout=10) as response:
+        import json
+
+        return json.loads(response.read().decode("utf-8"))
+
+
+def uid_from_iam_profile(profile: dict[str, Any]) -> str | None:
+    attributes = profile.get("attributes") or {}
+    return attributes.get("account_no") or attributes.get("user_uid") or profile.get("id")
+
+
+def iam_callback(code: str | None, _: str | None = None) -> dict[str, Any]:
+    if not code:
+        raise BusinessError("IAM_CODE_REQUIRED", "缺少 IAM 授权码")
+    try:
+        token_payload = exchange_iam_code_for_token(code)
+    except Exception as exc:
+        raise BusinessError("IAM_TOKEN_EXCHANGE_FAILED", "IAM token 换取失败", 401) from exc
+    access_token = token_payload.get("access_token")
+    if not access_token:
+        raise BusinessError("IAM_TOKEN_EXCHANGE_FAILED", "IAM token 换取失败", 401)
+    try:
+        profile = fetch_iam_profile(access_token)
+    except Exception as exc:
+        raise BusinessError("IAM_PROFILE_FAILED", "IAM 用户信息获取失败", 401) from exc
+    uid = uid_from_iam_profile(profile)
+    if not uid:
+        raise BusinessError("IAM_PROFILE_UID_MISSING", "IAM 用户信息缺少可映射 UID", 401)
+    user = query_one("SELECT * FROM users WHERE uid = ? AND status = ?", (uid, UserStatus.ACTIVE))
+    if not user:
+        raise BusinessError("INVALID_UID", "UID 不存在或已停用", 401)
+    return issue_checkflow_token(user)
 
 
 def list_users(keyword: str | None, status: str | None, permission: str | None, page: int, page_size: int, actor: dict[str, Any]) -> dict[str, Any]:

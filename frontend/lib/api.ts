@@ -43,6 +43,10 @@ export type LoginResult = {
   user: User;
 };
 
+export type IamLoginUrl = {
+  login_url: string;
+};
+
 export type ListUsersParams = {
   keyword?: string;
   status?: string;
@@ -439,6 +443,11 @@ export function login(uid: string, password: string) {
     method: "POST",
     body: jsonBody({ uid, password })
   });
+}
+
+export function getIamLoginUrl(state?: string) {
+  const query = state ? `?state=${encodeURIComponent(state)}` : "";
+  return apiRequest<IamLoginUrl>(`/api/v1/auth/iam/login-url${query}`, { token: null });
 }
 
 export function getCurrentUser() {
