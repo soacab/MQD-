@@ -58,7 +58,14 @@ def require_rule_read_permissions(user: dict[str, Any]) -> None:
 def task_in_business_scope(task: dict[str, Any], user: dict[str, Any]) -> bool:
     if has_full_business_scope(user):
         return True
-    return Permission.INSPECTION_ENGINEER in business_permissions(user) and task["created_by"] == user["id"]
+    if Permission.INSPECTION_ENGINEER not in business_permissions(user):
+        return False
+    project = query_one("SELECT mq_user_id FROM projects WHERE id = ?", (task["project_id"],))
+    if not project:
+        return False
+    if project["mq_user_id"] is not None:
+        return project["mq_user_id"] == user["id"]
+    return task["created_by"] == user["id"]
 
 
 def project_in_business_scope(project_id: int, user: dict[str, Any]) -> bool:
@@ -66,6 +73,11 @@ def project_in_business_scope(project_id: int, user: dict[str, Any]) -> bool:
         return True
     if Permission.INSPECTION_ENGINEER not in business_permissions(user):
         return False
+    project = query_one("SELECT mq_user_id FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        return False
+    if project["mq_user_id"] is not None:
+        return project["mq_user_id"] == user["id"]
     return bool(
         query_one(
             "SELECT id FROM inspection_tasks WHERE project_id = ? AND created_by = ? LIMIT 1",

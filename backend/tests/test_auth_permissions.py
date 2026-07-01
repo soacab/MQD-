@@ -59,7 +59,7 @@ class AuthPermissionTest(unittest.TestCase):
         rows = response.json()["data"]["items"]
         return [row["action"] for row in rows if row["entity_type"] == entity_type and row["entity_id"] == entity_id]
 
-    def _create_project(self, name: str, folder_guid: str) -> int:
+    def _create_project(self, name: str, folder_guid: str, mq_user_id: int | None = None) -> int:
         response = self.client.post(
             "/api/v1/projects",
             headers=self.admin_headers,
@@ -67,6 +67,7 @@ class AuthPermissionTest(unittest.TestCase):
                 "project_name": name,
                 "customer": "ACME",
                 "receive_date": "2026-06-30",
+                "mq_user_id": mq_user_id,
                 "vdrive_url": f"https://vdrive.example.com/?folderGuid={folder_guid}",
             },
         )
@@ -170,55 +171,124 @@ class AuthPermissionTest(unittest.TestCase):
             response = self.client.get(path, headers=headers)
             self.assertEqual(response.status_code, 403, f"{path}: {response.text}")
 
-    def test_inspection_engineer_scope_is_created_tasks(self):
-        self._publish_manual_rule("AUTH-SCOPE-OWN")
-        own_project_id = self._create_project("P-own-task", "OWN-TASK")
-        other_project_id = self._create_project("P-other-task", "OTHER-TASK")
-        engineer = self._create_user("scope_engineer", ["inspection_engineer"])
+    def test_inspection_engineer_scope_follows_project_mq_user(self):
+        self._publish_manual_rule("AUTH-SCOPE-MQ")
+        mq_engineer = self._create_user("scope_mq_engineer", ["inspection_engineer"])
+        creator_engineer = self._create_user("scope_creator_engineer", ["inspection_engineer"])
         other_engineer = self._create_user("other_scope_engineer", ["inspection_engineer"])
-        engineer_headers = self._login_headers("scope_engineer")
+        mq_headers = self._login_headers("scope_mq_engineer")
+        creator_headers = self._login_headers("scope_creator_engineer")
         other_headers = self._login_headers("other_scope_engineer")
+        assigned_project_id = self._create_project("P-assigned-mq", "ASSIGNED-MQ", mq_engineer["id"])
+        other_project_id = self._create_project("P-other-mq", "OTHER-MQ", other_engineer["id"])
 
-        own_task_id = self._create_task(engineer_headers, own_project_id)
+        assigned_task_id = self._create_task(creator_headers, assigned_project_id)
         other_task_id = self._create_task(other_headers, other_project_id)
 
-        own_task = self.client.get(f"/api/v1/inspection-tasks/{own_task_id}", headers=engineer_headers)
-        self.assertEqual(own_task.status_code, 200, own_task.text)
-        self.assertEqual(own_task.json()["data"]["created_by"], engineer["id"])
+        assigned_task = self.client.get(f"/api/v1/inspection-tasks/{assigned_task_id}", headers=mq_headers)
+        self.assertEqual(assigned_task.status_code, 200, assigned_task.text)
+        self.assertEqual(assigned_task.json()["data"]["created_by"], creator_engineer["id"])
+        self.assertEqual(assigned_task.json()["data"]["project"]["mq_user_id"], mq_engineer["id"])
 
-        task_list = self.client.get("/api/v1/inspection-tasks", headers=engineer_headers)
+        task_list = self.client.get("/api/v1/inspection-tasks", headers=mq_headers)
         self.assertEqual(task_list.status_code, 200, task_list.text)
-        self.assertEqual([item["id"] for item in task_list.json()["data"]["items"]], [own_task_id])
+        self.assertEqual([item["id"] for item in task_list.json()["data"]["items"]], [assigned_task_id])
 
-        project_list = self.client.get("/api/v1/projects", headers=engineer_headers)
+        overview = self.client.get("/api/v1/dashboard/overview", headers=mq_headers)
+        self.assertEqual(overview.status_code, 200, overview.text)
+        self.assertEqual(overview.json()["data"]["running_count"], 1)
+        creator_overview = self.client.get("/api/v1/dashboard/overview", headers=creator_headers)
+        self.assertEqual(creator_overview.status_code, 200, creator_overview.text)
+        self.assertEqual(creator_overview.json()["data"]["running_count"], 0)
+
+        todos = self.client.get("/api/v1/dashboard/my-todos", headers=mq_headers)
+        self.assertEqual(todos.status_code, 200, todos.text)
+        self.assertEqual([item["task_id"] for item in todos.json()["data"]["items"]], [assigned_task_id])
+
+        project_list = self.client.get("/api/v1/projects", headers=mq_headers)
         self.assertEqual(project_list.status_code, 200, project_list.text)
-        self.assertEqual([item["id"] for item in project_list.json()["data"]["items"]], [own_project_id])
+        self.assertEqual([item["id"] for item in project_list.json()["data"]["items"]], [assigned_project_id])
 
-        own_project = self.client.get(f"/api/v1/projects/{own_project_id}", headers=engineer_headers)
-        self.assertEqual(own_project.status_code, 200, own_project.text)
+        assigned_project = self.client.get(f"/api/v1/projects/{assigned_project_id}", headers=mq_headers)
+        self.assertEqual(assigned_project.status_code, 200, assigned_project.text)
 
-        other_project = self.client.get(f"/api/v1/projects/{other_project_id}", headers=engineer_headers)
+        creator_task = self.client.get(f"/api/v1/inspection-tasks/{assigned_task_id}", headers=creator_headers)
+        self.assertEqual(creator_task.status_code, 403, creator_task.text)
+
+        other_project = self.client.get(f"/api/v1/projects/{other_project_id}", headers=mq_headers)
         self.assertEqual(other_project.status_code, 403, other_project.text)
 
-        other_task = self.client.get(f"/api/v1/inspection-tasks/{other_task_id}", headers=engineer_headers)
+        other_task = self.client.get(f"/api/v1/inspection-tasks/{other_task_id}", headers=mq_headers)
         self.assertEqual(other_task.status_code, 403, other_task.text)
 
+        assigned_item_id = self._current_item_id(mq_headers, assigned_task_id)
         other_item_id = self._current_item_id(other_headers, other_task_id)
-        other_item = self.client.get(f"/api/v1/inspection-items/{other_item_id}", headers=engineer_headers)
+        other_item = self.client.get(f"/api/v1/inspection-items/{other_item_id}", headers=mq_headers)
         self.assertEqual(other_item.status_code, 403, other_item.text)
 
-        reports = self.client.get("/api/v1/reports", headers=engineer_headers)
+        confirm = self.client.post(
+            f"/api/v1/inspection-items/{assigned_item_id}/confirm",
+            headers=mq_headers,
+            json={"decision_result": "pass", "decision_text": "MQ engineer owns this task scope."},
+        )
+        self.assertEqual(confirm.status_code, 200, confirm.text)
+        archive = self.client.post(f"/api/v1/inspection-tasks/{assigned_task_id}/archive-current-round", headers=mq_headers)
+        self.assertEqual(archive.status_code, 200, archive.text)
+        reports = self.client.get("/api/v1/reports", headers=mq_headers)
         self.assertEqual(reports.status_code, 200, reports.text)
-        self.assertEqual([item["inspection_task_id"] for item in reports.json()["data"]["items"]], [own_task_id])
+        self.assertEqual([item["inspection_task_id"] for item in reports.json()["data"]["items"]], [assigned_task_id])
+        report_id = reports.json()["data"]["items"][0]["id"]
+        report_detail = self.client.get(f"/api/v1/reports/{report_id}", headers=mq_headers)
+        self.assertEqual(report_detail.status_code, 200, report_detail.text)
+
+    def test_inspection_engineer_scope_falls_back_to_task_creator_without_project_mq_user(self):
+        self._publish_manual_rule("AUTH-SCOPE-LEGACY")
+        project_id = self._create_project("P-legacy-created", "LEGACY-CREATED")
+        creator = self._create_user("legacy_creator", ["inspection_engineer"])
+        other = self._create_user("legacy_other", ["inspection_engineer"])
+        creator_headers = self._login_headers("legacy_creator")
+        other_headers = self._login_headers("legacy_other")
+
+        task_id = self._create_task(creator_headers, project_id)
+
+        creator_task = self.client.get(f"/api/v1/inspection-tasks/{task_id}", headers=creator_headers)
+        self.assertEqual(creator_task.status_code, 200, creator_task.text)
+        self.assertEqual(creator_task.json()["data"]["created_by"], creator["id"])
+        self.assertIsNone(creator_task.json()["data"]["project"]["mq_user_id"])
+
+        other_task = self.client.get(f"/api/v1/inspection-tasks/{task_id}", headers=other_headers)
+        self.assertEqual(other_task.status_code, 403, other_task.text)
+
+    def test_prepare_inspection_task_history_follows_project_mq_user_scope(self):
+        mq_engineer = self._create_user("prepare_mq_engineer", ["inspection_engineer"])
+        other_engineer = self._create_user("prepare_other_engineer", ["inspection_engineer"])
+        mq_headers = self._login_headers("prepare_mq_engineer")
+        other_headers = self._login_headers("prepare_other_engineer")
+        self._create_project("P-prepare-owned", "PREPARE-OWNED", mq_engineer["id"])
+
+        allowed = self.client.post(
+            "/api/v1/inspection-tasks/prepare",
+            headers=mq_headers,
+            json={"vdrive_url": "https://vdrive.example.com/?folderGuid=PREPARE-OWNED"},
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        self.assertTrue(allowed.json()["data"]["has_history"])
+
+        denied = self.client.post(
+            "/api/v1/inspection-tasks/prepare",
+            headers=other_headers,
+            json={"vdrive_url": "https://vdrive.example.com/?folderGuid=PREPARE-OWNED"},
+        )
+        self.assertEqual(denied.status_code, 403, denied.text)
 
     def test_archive_projects_follow_engineer_and_project_admin_scope(self):
         self._publish_manual_rule("AUTH-ARCHIVE-SCOPE")
         self._publish_manual_rule("AUTH-ARCHIVE-SCOPE-QG3", qg_node_id=2)
-        own_project_id = self._create_project("P-own-archive", "OWN-ARCHIVE")
-        other_project_id = self._create_project("P-other-archive", "OTHER-ARCHIVE")
-        shared_project_id = self._create_project("P-shared-archive", "SHARED-ARCHIVE")
-        self._create_user("archive_engineer", ["inspection_engineer"])
-        self._create_user("archive_other_engineer", ["inspection_engineer"])
+        engineer = self._create_user("archive_engineer", ["inspection_engineer"])
+        other_engineer = self._create_user("archive_other_engineer", ["inspection_engineer"])
+        own_project_id = self._create_project("P-own-archive", "OWN-ARCHIVE", engineer["id"])
+        other_project_id = self._create_project("P-other-archive", "OTHER-ARCHIVE", other_engineer["id"])
+        shared_project_id = self._create_project("P-shared-archive", "SHARED-ARCHIVE", engineer["id"])
         engineer_headers = self._login_headers("archive_engineer")
         other_headers = self._login_headers("archive_other_engineer")
 
@@ -228,16 +298,16 @@ class AuthPermissionTest(unittest.TestCase):
         self._archive_single_item_task(engineer_headers, own_task_id, "pass")
         self._archive_single_item_task(engineer_headers, shared_old_task_id, "pass")
         self._archive_single_item_task(other_headers, other_task_id, "conditional")
-        shared_latest_task_id = self._create_task(other_headers, shared_project_id, qg_node_id=2)
-        self._archive_single_item_task(other_headers, shared_latest_task_id, "fail")
+        shared_latest_task_id = self._create_task(self.admin_headers, shared_project_id, qg_node_id=2)
+        self._archive_single_item_task(self.admin_headers, shared_latest_task_id, "fail")
 
         engineer_archive = self.client.get("/api/v1/archive-projects", headers=engineer_headers)
         self.assertEqual(engineer_archive.status_code, 200, engineer_archive.text)
         engineer_rows = engineer_archive.json()["data"]["items"]
         self.assertEqual({item["project_id"] for item in engineer_rows}, {own_project_id, shared_project_id})
         engineer_shared_row = next(item for item in engineer_rows if item["project_id"] == shared_project_id)
-        self.assertEqual(engineer_shared_row["inspection_task_id"], shared_old_task_id)
-        self.assertEqual(engineer_shared_row["overall_result"], "FULL_GO")
+        self.assertEqual(engineer_shared_row["inspection_task_id"], shared_latest_task_id)
+        self.assertEqual(engineer_shared_row["overall_result"], "NO_GO")
 
         admin_archive = self.client.get("/api/v1/archive-projects", headers=self.admin_headers)
         self.assertEqual(admin_archive.status_code, 200, admin_archive.text)
@@ -404,13 +474,13 @@ class AuthPermissionTest(unittest.TestCase):
         )
         self.assertEqual(no_scope_order.status_code, 403, no_scope_order.text)
 
-    def test_work_item_lists_follow_task_creator_scope(self):
+    def test_work_item_lists_follow_business_scope(self):
         self._publish_manual_rule("AUTH-SCOPE-WORK")
-        fail_project_id = self._create_project("P-fail-work", "FAIL-WORK")
-        followup_project_id = self._create_project("P-followup-work", "FOLLOWUP-WORK")
-        self._create_user("fail_owner", ["inspection_engineer"])
-        self._create_user("followup_owner", ["inspection_engineer"])
+        fail_owner = self._create_user("fail_owner", ["inspection_engineer"])
+        followup_owner = self._create_user("followup_owner", ["inspection_engineer"])
         self._create_user("work_project_admin", ["project_admin"])
+        fail_project_id = self._create_project("P-fail-work", "FAIL-WORK", fail_owner["id"])
+        followup_project_id = self._create_project("P-followup-work", "FOLLOWUP-WORK", followup_owner["id"])
         fail_headers = self._login_headers("fail_owner")
         followup_headers = self._login_headers("followup_owner")
         project_admin_headers = self._login_headers("work_project_admin")

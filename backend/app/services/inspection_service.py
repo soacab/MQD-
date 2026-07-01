@@ -23,6 +23,7 @@ from app.services.permission_service import (
     require_followup_scope,
     require_item_scope,
     require_permissions,
+    require_project_scope,
     require_rectification_scope,
     require_task_scope,
     task_in_business_scope,
@@ -34,6 +35,8 @@ def prepare_inspection_task(payload: dict[str, Any], user: dict[str, Any]) -> di
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
     vdrive = project_service.parse_vdrive_url(payload.get("vdrive_url", ""))
     project = project_service.find_project_by_vdrive(vdrive)
+    if project:
+        require_project_scope(user, project)
     project_payload = project_service.project_detail(project) if project else None
     return {
         "vdrive": vdrive,
