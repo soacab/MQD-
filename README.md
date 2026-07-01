@@ -64,18 +64,33 @@ npm install
 cd ..
 ```
 
-### 启动后端
+### 启动本地开发服务
 
 ```bash
-PORT=$(codex-port reserve "$PWD" backend)
-uv run uvicorn app.main:app --app-dir backend --reload --port "$PORT"
+./scripts/dev_up.sh
+./scripts/dev_status.sh
 ```
 
-### 启动前端
+脚本会通过 `nohup` 后台启动后端和前端，端口、PID 与日志写入 `.dev/`。停止服务：
 
 ```bash
-API_PORT=$(codex-port reserve "$PWD" backend)
-WEB_PORT=$(codex-port reserve "$PWD/frontend" dev)
+./scripts/dev_down.sh
+```
+
+不要手动使用 `8000` 作为 CheckFlow 后端端口；该端口可能被其他本地项目占用。后端和前端端口必须以 `codex-port` 登记结果为准，前端必须通过 `NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:${API_PORT}"` 指向登记后的后端端口。
+
+### 手动启动后端
+
+```bash
+PORT=$(codex-port reserve "$PWD/backend" api)
+uv run uvicorn app.main:app --app-dir backend --reload --reload-dir backend --port "$PORT"
+```
+
+### 手动启动前端
+
+```bash
+API_PORT=$(codex-port reserve "$PWD/backend" api)
+WEB_PORT=$(codex-port reserve "$PWD" dev)
 cd frontend
 NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:${API_PORT}" npm run dev -- -p "$WEB_PORT"
 ```

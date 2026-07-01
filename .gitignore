@@ -7,5 +7,6 @@ node_modules/
 .env
 .env.*
 !.env.example
+.dev/
 checkflow.db
 backend/checkflow.db
