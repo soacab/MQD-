@@ -116,14 +116,22 @@ a {
 
 .app-nav a:hover,
 .app-nav a.active,
-.app-account-link:hover {
+.app-account-link:hover,
+.app-account-link:focus-visible {
   background: var(--cf-primary-50);
   color: var(--cf-primary-700);
+}
+
+.app-account {
+  position: relative;
+  flex-shrink: 0;
 }
 
 .app-account-link {
   border: 1px solid var(--cf-border-default);
   background: var(--cf-bg-surface);
+  cursor: pointer;
+  font-family: inherit;
 }
 
 .app-topbar-actions {
@@ -171,6 +179,88 @@ a {
   place-items: center;
   font-size: 12px;
   font-weight: 700;
+}
+
+.app-account-caret {
+  color: var(--cf-text-tertiary);
+}
+
+.app-account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 224px;
+  padding: 8px;
+  border: 1px solid var(--cf-border-default);
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-bg-surface);
+  box-shadow: var(--cf-shadow-md);
+}
+
+.app-account-menu-head {
+  padding: 8px 9px 10px;
+  border-bottom: 1px solid var(--cf-border-subtle);
+  margin-bottom: 6px;
+}
+
+.app-account-menu-label {
+  margin-bottom: 4px;
+  color: var(--cf-text-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.app-account-menu-name {
+  color: var(--cf-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.app-account-menu-meta,
+.app-account-menu-role {
+  margin-top: 2px;
+  color: var(--cf-text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.app-account-menu-item {
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--cf-radius-md);
+  background: transparent;
+  color: var(--cf-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.app-account-menu-item:hover,
+.app-account-menu-item:focus-visible {
+  background: var(--cf-bg-subtle);
+  color: var(--cf-text-primary);
+}
+
+.app-account-menu-item.danger {
+  color: var(--cf-status-fail-text);
+}
+
+.app-account-menu-item.danger:hover,
+.app-account-menu-item.danger:focus-visible {
+  background: var(--cf-status-fail-bg);
+  color: var(--cf-status-fail-text);
+}
+
+.app-account-menu-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--cf-border-subtle);
 }
 
 .board-workbench {
@@ -3299,7 +3389,15 @@ tbody tr:hover {
   .app-nav,
   .app-topbar-actions {
     width: 100%;
+  }
+
+  .app-nav {
     overflow-x: auto;
+  }
+
+  .app-topbar-actions {
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   .app-create-task,

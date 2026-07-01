@@ -1,9 +1,9 @@
 "use client";
 
-import { FileText, ListChecks, Plus, Settings } from "lucide-react";
+import { ChevronDown, FileText, ListChecks, Plus } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { getStoredUser } from "@/lib/session";
+import { useEffect, useRef, useState } from "react";
+import { clearSession, getStoredUser } from "@/lib/session";
 import type { User } from "@/lib/api";
 
 const navItems = [
@@ -23,9 +23,25 @@ function userInitial(user: User | null) {
   return (user?.name || user?.uid || "账").slice(0, 1);
 }
 
+const permissionLabels: Record<string, string> = {
+  inspection_engineer: "点检执行",
+  rules_admin: "规则管理",
+  project_admin: "项目管理",
+  super_admin: "权限管理"
+};
+
+function permissionSummary(user: User | null) {
+  if (!user?.permissions.length) {
+    return "未分配权限";
+  }
+  return user.permissions.map((permission) => permissionLabels[permission] || permission).join(" / ");
+}
+
 export function AppNav() {
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     function syncStoredUser() {
@@ -36,8 +52,32 @@ export function AppNav() {
     return () => window.removeEventListener("checkflow:session-changed", syncStoredUser);
   }, []);
 
+  useEffect(() => {
+    if (!isAccountMenuOpen) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!accountRef.current?.contains(event.target as Node)) {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isAccountMenuOpen]);
+
   const canCreateTask = Boolean(user?.permissions.includes("inspection_engineer"));
-  const canOpenAdmin = Boolean(user?.permissions.some((permission) => permission === "super_admin"));
 
   function openNewTaskModal() {
     if (pathname === "/") {
@@ -45,6 +85,26 @@ export function AppNav() {
       return;
     }
     window.location.href = "/?new_task=1";
+  }
+
+  function toggleAccountMenu() {
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+    setIsAccountMenuOpen((current) => !current);
+  }
+
+  function openAdmin() {
+    setIsAccountMenuOpen(false);
+    window.location.href = "/admin";
+  }
+
+  function handleLogout() {
+    clearSession();
+    setUser(null);
+    setIsAccountMenuOpen(false);
+    window.location.href = "/login";
   }
 
   return (
@@ -76,11 +136,36 @@ export function AppNav() {
             <span>+ 新建任务</span>
           </span>
         )}
-        <a className="app-account-link" href={canOpenAdmin ? "/admin" : "/login"}>
-          <span className="app-account-avatar">{userInitial(user)}</span>
-          <span>{canOpenAdmin ? `${user?.name || "账号"} / 后台` : user?.name || "账号"}</span>
-          <Settings aria-hidden="true" size={14} />
-        </a>
+        <div className="app-account" ref={accountRef}>
+          <button
+            className="app-account-link"
+            type="button"
+            onClick={toggleAccountMenu}
+            aria-haspopup={user ? "menu" : undefined}
+            aria-expanded={user ? isAccountMenuOpen : undefined}
+          >
+            <span className="app-account-avatar">{userInitial(user)}</span>
+            <span>{user?.name || "账号"}</span>
+            {user ? <ChevronDown aria-hidden="true" className="app-account-caret" size={14} /> : null}
+          </button>
+          {user && isAccountMenuOpen ? (
+            <div className="app-account-menu" role="menu" aria-label="账号菜单">
+              <div className="app-account-menu-head">
+                <div className="app-account-menu-label">当前用户信息</div>
+                <div className="app-account-menu-name">{user.name}</div>
+                <div className="app-account-menu-meta">{user.uid}</div>
+                <div className="app-account-menu-role">{permissionSummary(user)}</div>
+              </div>
+              <button className="app-account-menu-item" type="button" role="menuitem" onClick={openAdmin}>
+                后台管理
+              </button>
+              <div className="app-account-menu-divider" />
+              <button className="app-account-menu-item danger" type="button" role="menuitem" onClick={handleLogout}>
+                退出登录
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );

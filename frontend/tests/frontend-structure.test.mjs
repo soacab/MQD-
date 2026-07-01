@@ -529,7 +529,11 @@ describe("frontend structure", () => {
     for (const snippet of ["工作台", "规则配置", "检查档案", "\\+ 新建任务", "getStoredUser", "canCreateTask", "/admin"]) {
       assert.match(appNav, new RegExp(snippet), `AppNav should contain ${snippet}`);
     }
-    assert.doesNotMatch(appNav, /后台管理/, "prototype-style top nav should not expose backend management as a primary tab");
+    for (const snippet of ["clearSession", "aria-expanded", "app-account-menu", "后台管理", "退出登录"]) {
+      assert.match(appNav, new RegExp(snippet), `AppNav account menu should contain ${snippet}`);
+    }
+    const navItemsSource = appNav.match(/const navItems = \[[\s\S]*?\];/)?.[0] || "";
+    assert.doesNotMatch(navItemsSource, /后台管理/, "prototype-style top nav should not expose backend management as a primary tab");
 
     for (const snippet of [
       "--cf-bg-base",
