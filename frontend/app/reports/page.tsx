@@ -95,6 +95,19 @@ function resolveDefaultArchiveFilters(me: User, userOptions: BusinessUserOption[
   return currentUserOption ? { ...emptyArchiveFilters, mq_user_id: String(me.id) } : { ...emptyArchiveFilters };
 }
 
+function dateRangeLabel(filters: { modified_from?: string; modified_to?: string }) {
+  if (filters.modified_from && filters.modified_to) {
+    return `${filters.modified_from} 至 ${filters.modified_to}`;
+  }
+  if (filters.modified_from) {
+    return `${filters.modified_from} 起`;
+  }
+  if (filters.modified_to) {
+    return `截至 ${filters.modified_to}`;
+  }
+  return "选择日期范围";
+}
+
 function escapeExcelCell(value: unknown) {
   const text = String(value ?? "");
   const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
@@ -135,6 +148,7 @@ export default function ReportsPage() {
   const [total, setTotal] = useState(0);
   const [addOrderForm, setAddOrderForm] = useState({ receive_date: "", models: "" });
   const [isAddingOrder, setIsAddingOrder] = useState(false);
+  const [isDateRangeOpen, setDateRangeOpen] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
 
   const canManageProjects = currentUser?.permissions.includes("project_admin");
@@ -195,6 +209,14 @@ export default function ReportsPage() {
   async function handleResetDates() {
     const nextFilters = { ...archiveFilters, modified_from: "", modified_to: "", page: "1" };
     setArchiveFilters(nextFilters);
+    setDateRangeOpen(false);
+    await refresh(nextFilters);
+  }
+
+  async function handleApplyDateRange() {
+    const nextFilters = { ...archiveFilters, page: "1" };
+    setArchiveFilters(nextFilters);
+    setDateRangeOpen(false);
     await refresh(nextFilters);
   }
 
@@ -352,21 +374,55 @@ export default function ReportsPage() {
           <option value="C_GO">C-GO</option>
           <option value="NO_GO">NO-GO</option>
         </select>
-        <label className="archive-date-range">
-          <span>选择日期范围</span>
-          <input
-            aria-label="报告修改开始日期"
-            type="date"
-            value={archiveFilters.modified_from}
-            onChange={(event) => setArchiveFilters({ ...archiveFilters, modified_from: event.target.value })}
-          />
-          <input
-            aria-label="报告修改结束日期"
-            type="date"
-            value={archiveFilters.modified_to}
-            onChange={(event) => setArchiveFilters({ ...archiveFilters, modified_to: event.target.value })}
-          />
-        </label>
+        <div className="archive-date-picker">
+          <button
+            type="button"
+            className="archive-date-trigger"
+            aria-expanded={isDateRangeOpen}
+            onClick={() => setDateRangeOpen((open) => !open)}
+          >
+            <span>{dateRangeLabel(archiveFilters)}</span>
+          </button>
+          {isDateRangeOpen ? (
+            <div className="archive-date-popover" role="dialog" aria-label="选择报告修改时间范围">
+              <div className="archive-date-popover-head">
+                <strong>选择报告修改时间范围</strong>
+                <span>先点开始日期，再点结束日期</span>
+              </div>
+              <div className="archive-date-fields">
+                <label>
+                  开始日期
+                  <input
+                    aria-label="范围开始日期"
+                    type="date"
+                    value={archiveFilters.modified_from}
+                    onChange={(event) => setArchiveFilters({ ...archiveFilters, modified_from: event.target.value })}
+                  />
+                </label>
+                <label>
+                  结束日期
+                  <input
+                    aria-label="范围结束日期"
+                    type="date"
+                    value={archiveFilters.modified_to}
+                    onChange={(event) => setArchiveFilters({ ...archiveFilters, modified_to: event.target.value })}
+                  />
+                </label>
+              </div>
+              <div className="archive-date-actions">
+                <button type="button" className="link-button" onClick={() => void handleResetDates()}>
+                  清空
+                </button>
+                <button type="button" className="secondary-button" onClick={() => setDateRangeOpen(false)}>
+                  取消
+                </button>
+                <button type="button" onClick={() => void handleApplyDateRange()}>
+                  应用
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
         <button type="button" className="secondary-button" onClick={() => void handleResetDates()}>
           重置日期
         </button>

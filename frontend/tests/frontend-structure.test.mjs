@@ -406,6 +406,9 @@ describe("frontend structure", () => {
       "全部QG节点",
       "全部QG结论",
       "选择日期范围",
+      "dateRangeLabel",
+      "archive-date-trigger",
+      "archive-date-popover",
       "重置日期",
       "导出 Excel",
       "项目创建时间",
@@ -431,6 +434,9 @@ describe("frontend structure", () => {
 
     assert.doesNotMatch(reportsPage, /field-governance-note/, "reports page should not show internal field governance copy");
     assert.doesNotMatch(reportsPage, /删除项目/, "reports page should use void-hide copy instead of delete copy");
+    assert.doesNotMatch(reportsPage, /className="archive-date-range"/, "reports page should use one range picker trigger instead of two toolbar date inputs");
+    assert.doesNotMatch(reportsPage, /aria-label="报告修改开始日期"/, "reports page should not expose a split start date input in the toolbar");
+    assert.doesNotMatch(reportsPage, /aria-label="报告修改结束日期"/, "reports page should not expose a split end date input in the toolbar");
 
     for (const snippet of [
       ".archive-shell",
@@ -438,6 +444,8 @@ describe("frontend structure", () => {
       ".archive-table",
       ".archive-result-pill",
       ".archive-modal-backdrop",
+      ".archive-date-trigger",
+      ".archive-date-popover",
       ".archive-pagination",
       ".archive-report-summary",
       ".archive-report-item"

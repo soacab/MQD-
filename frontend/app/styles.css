@@ -2629,18 +2629,91 @@ tbody tr:hover {
   color: #4f46e5;
 }
 
-.archive-date-range {
-  display: grid;
-  grid-template-columns: auto minmax(120px, 1fr) minmax(120px, 1fr);
-  gap: 8px;
-  align-items: center;
+.archive-date-picker {
+  position: relative;
   min-width: 0;
 }
 
-.archive-date-range span {
+.archive-date-trigger {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+}
+
+.archive-date-trigger::before {
+  color: #7c8798;
+  content: "□";
+}
+
+.archive-date-trigger::after {
+  color: #7c8798;
+  content: "⌄";
+}
+
+.archive-date-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archive-date-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  width: min(420px, calc(100vw - 48px));
+  gap: 14px;
+  border: 1px solid #dde4ef;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.archive-date-popover-head {
+  display: grid;
+  gap: 4px;
+}
+
+.archive-date-popover-head strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.archive-date-popover-head span,
+.archive-date-fields label {
   color: #66738a;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+}
+
+.archive-date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.archive-date-fields label {
+  display: grid;
+  gap: 6px;
+}
+
+.archive-date-fields input {
+  min-height: 38px;
+  padding: 7px 9px;
+}
+
+.archive-date-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.archive-date-actions button {
+  min-height: 36px;
 }
 
 .archive-table-card {
@@ -3210,7 +3283,7 @@ tbody tr:hover {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .archive-date-range {
+  .archive-date-picker {
     grid-column: 1 / -1;
   }
 }
@@ -3342,7 +3415,7 @@ tbody tr:hover {
   .model-row,
   .new-task-grid-2,
   .new-task-path-row,
-  .archive-date-range,
+  .archive-date-fields,
   .archive-order-head,
   .archive-order-row,
   .archive-pagination {
