@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, FileText, ListChecks, Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { clearSession, getStoredUser } from "@/lib/session";
@@ -8,9 +8,14 @@ import type { User } from "@/lib/api";
 
 const navItems = [
   { href: "/", label: "工作台" },
-  { href: "/rules", label: "规则配置", icon: ListChecks },
-  { href: "/reports", label: "检查档案", icon: FileText }
+  { href: "/rules", label: "规则配置" },
+  { href: "/reports", label: "检查档案" }
 ];
+
+type RulesActionsState = {
+  canPublish: boolean;
+  isPublishing: boolean;
+};
 
 function isActive(pathname: string, href: string) {
   if (href === "/") {
@@ -41,6 +46,10 @@ export function AppNav() {
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [rulesActionsState, setRulesActionsState] = useState<RulesActionsState>({
+    canPublish: false,
+    isPublishing: false
+  });
   const accountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -77,14 +86,36 @@ export function AppNav() {
     };
   }, [isAccountMenuOpen]);
 
+  useEffect(() => {
+    function syncRulesActionsState(event: Event) {
+      const detail = (event as CustomEvent<RulesActionsState>).detail;
+      if (!detail) {
+        return;
+      }
+      setRulesActionsState({
+        canPublish: Boolean(detail.canPublish),
+        isPublishing: Boolean(detail.isPublishing)
+      });
+    }
+
+    window.addEventListener("checkflow:rules-actions-state", syncRulesActionsState);
+    return () => window.removeEventListener("checkflow:rules-actions-state", syncRulesActionsState);
+  }, []);
+
+  const isHome = pathname === "/";
+  const isRules = pathname.startsWith("/rules");
   const canCreateTask = Boolean(user?.permissions.includes("inspection_engineer"));
 
   function openNewTaskModal() {
-    if (pathname === "/") {
-      window.dispatchEvent(new CustomEvent("checkflow:new-task"));
-      return;
-    }
-    window.location.href = "/?new_task=1";
+    window.dispatchEvent(new CustomEvent("checkflow:new-task"));
+  }
+
+  function openRulesHistory() {
+    window.dispatchEvent(new CustomEvent("checkflow:rules-open-history"));
+  }
+
+  function openRulesPublish() {
+    window.dispatchEvent(new CustomEvent("checkflow:rules-open-publish"));
   }
 
   function toggleAccountMenu() {
@@ -114,28 +145,41 @@ export function AppNav() {
         <span className="app-brand-text">CheckFlow</span>
       </a>
       <nav className="app-nav" aria-label="主导航">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <a className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>
-              {Icon ? <Icon aria-hidden="true" size={15} strokeWidth={2} /> : null}
-              <span>{item.label}</span>
-            </a>
-          );
-        })}
+        {navItems.map((item) => (
+          <a className={isActive(pathname, item.href) ? "active" : ""} href={item.href} key={item.href}>
+            <span>{item.label}</span>
+          </a>
+        ))}
       </nav>
       <div className="app-topbar-actions">
-        {canCreateTask ? (
-          <button className="app-create-task" type="button" onClick={openNewTaskModal}>
-            <Plus aria-hidden="true" size={16} strokeWidth={2.4} />
-            <span>+ 新建任务</span>
-          </button>
-        ) : (
-          <span className="app-create-task disabled" title="当前账号没有点检执行权限" aria-disabled="true">
-            <Plus aria-hidden="true" size={16} strokeWidth={2.4} />
-            <span>+ 新建任务</span>
-          </span>
-        )}
+        {isHome ? (
+          canCreateTask ? (
+            <button className="app-topbar-button app-topbar-button-primary app-create-task" type="button" onClick={openNewTaskModal}>
+              <Plus aria-hidden="true" size={15} strokeWidth={2.4} />
+              <span>+ 新建任务</span>
+            </button>
+          ) : (
+            <span className="app-topbar-button app-topbar-button-primary app-create-task disabled" title="当前账号没有点检执行权限" aria-disabled="true">
+              <Plus aria-hidden="true" size={15} strokeWidth={2.4} />
+              <span>+ 新建任务</span>
+            </span>
+          )
+        ) : null}
+        {isRules ? (
+          <>
+            <button className="app-topbar-button app-topbar-button-secondary" type="button" onClick={openRulesHistory}>
+              版本历史
+            </button>
+            <button
+              className="app-topbar-button app-topbar-button-primary"
+              type="button"
+              disabled={!rulesActionsState.canPublish || rulesActionsState.isPublishing}
+              onClick={openRulesPublish}
+            >
+              {rulesActionsState.isPublishing ? "发布中..." : "发布规则版本"}
+            </button>
+          </>
+        ) : null}
         <div className="app-account" ref={accountRef}>
           <button
             className="app-account-link"

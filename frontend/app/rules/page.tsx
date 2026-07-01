@@ -163,6 +163,37 @@ export default function RulesPage() {
     return `生效于 ${formatDate(selectedVersion.published_at)} · ${selectedVersion.published_by_name || "-"} · 共 ${rules.length} 条`;
   }, [rules.length, selectedVersion]);
 
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("checkflow:rules-actions-state", {
+        detail: {
+          canPublish: canManageRules && isDraft,
+          isPublishing
+        }
+      })
+    );
+  }, [canManageRules, isDraft, isPublishing]);
+
+  useEffect(() => {
+    function openHistoryFromTopbar() {
+      setHistoryOpen(true);
+    }
+
+    function openPublishFromTopbar() {
+      if (!canManageRules || !isDraft || isPublishing) {
+        return;
+      }
+      setPublishOpen(true);
+    }
+
+    window.addEventListener("checkflow:rules-open-history", openHistoryFromTopbar);
+    window.addEventListener("checkflow:rules-open-publish", openPublishFromTopbar);
+    return () => {
+      window.removeEventListener("checkflow:rules-open-history", openHistoryFromTopbar);
+      window.removeEventListener("checkflow:rules-open-publish", openPublishFromTopbar);
+    };
+  }, [canManageRules, isDraft, isPublishing]);
+
   async function loadNode(qgNodeId: number, preferredVersionId?: number) {
     const versionRows = await listRuleVersions(qgNodeId);
     setVersions(versionRows.items);
@@ -371,22 +402,6 @@ export default function RulesPage() {
 
   return (
     <main className="page rules-workspace">
-      <header className="rules-page-header">
-        <div>
-          <p className="eyebrow">规则配置</p>
-          <h1>{selectedNode?.node_code || "QG"} - 检查规则</h1>
-          <p>{selectedVersionMeta}</p>
-        </div>
-        <div className="rules-header-actions">
-          <button type="button" className="secondary-button" onClick={() => setHistoryOpen(true)}>
-            版本历史
-          </button>
-          <button type="button" disabled={!canManageRules || !isDraft} onClick={() => setPublishOpen(true)}>
-            发布规则版本
-          </button>
-        </div>
-      </header>
-
       {message ? <p className="notice">{message}</p> : null}
       {!canManageRules ? <p className="notice">只读模式：规则管理员可编辑，当前用户只能查看规则配置和版本历史。</p> : null}
       <p className="field-governance-note">

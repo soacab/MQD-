@@ -537,6 +537,7 @@ describe("frontend structure", () => {
     const appNav = readFileSync(resolve(root, "app/AppNav.tsx"), "utf8");
     const styles = readFileSync(resolve(root, "app/styles.css"), "utf8");
     const homePage = readFileSync(resolve(root, "app/page.tsx"), "utf8");
+    const rulesPage = readFileSync(resolve(root, "app/rules/page.tsx"), "utf8");
     const inspectionPage = readFileSync(resolve(root, "app/inspection/page.tsx"), "utf8");
     const reportsPage = readFileSync(resolve(root, "app/reports/page.tsx"), "utf8");
 
@@ -546,11 +547,23 @@ describe("frontend structure", () => {
     for (const snippet of ["工作台", "规则配置", "检查档案", "\\+ 新建任务", "getStoredUser", "canCreateTask", "/admin"]) {
       assert.match(appNav, new RegExp(snippet), `AppNav should contain ${snippet}`);
     }
+    for (const snippet of ["isHome", "isRules", "checkflow:rules-open-history", "checkflow:rules-open-publish", "checkflow:rules-actions-state"]) {
+      assert.match(appNav, new RegExp(snippet), `AppNav should contain page-level topbar action ${snippet}`);
+    }
     for (const snippet of ["clearSession", "aria-expanded", "app-account-menu", "后台管理", "退出登录"]) {
       assert.match(appNav, new RegExp(snippet), `AppNav account menu should contain ${snippet}`);
     }
     const navItemsSource = appNav.match(/const navItems = \[[\s\S]*?\];/)?.[0] || "";
     assert.doesNotMatch(navItemsSource, /后台管理/, "prototype-style top nav should not expose backend management as a primary tab");
+    assert.doesNotMatch(navItemsSource, /icon:/, "prototype-style top nav should not show extra icons before nav labels");
+    assert.doesNotMatch(appNav, /FileText|ListChecks/, "prototype-style top nav should not import unused nav icons");
+    const topbarActionsSource = appNav.match(/<div className="app-topbar-actions">[\s\S]*?<div className="app-account"/)?.[0] || "";
+    assert.match(topbarActionsSource, /isHome \?/, "new task should be scoped to the workbench topbar action area");
+    assert.match(topbarActionsSource, /isRules \?/, "rules actions should be scoped to the rules topbar action area");
+    assert.match(rulesPage, /checkflow:rules-actions-state/, "rules page should publish topbar action state");
+    assert.match(rulesPage, /checkflow:rules-open-history/, "rules page should respond to topbar history action");
+    assert.match(rulesPage, /checkflow:rules-open-publish/, "rules page should respond to topbar publish action");
+    assert.doesNotMatch(rulesPage, /rules-header-actions/, "rules page should not keep duplicate page-header rule actions");
 
     for (const snippet of [
       "--cf-bg-base",
