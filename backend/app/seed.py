@@ -1,4 +1,4 @@
-from app.core.database import execute, query_one, to_json
+from app.core.database import execute, query_all, query_one, to_json
 from app.core.enums import Permission, SystemSettingKey, UserStatus
 
 
@@ -90,6 +90,7 @@ PROTOTYPE_RULE_DATA = {
             ("QG3:PROCESS_POKAYOKE_LIST", "过程防错清单", "ai-exist", "Poka yoke清单", "过程防错清单", "发布生产过程防错清单", "single_template", "PT"),
             ("QG3:FUNCTION_COVERAGE", "功能覆盖率", "ai-content", "功能覆盖率报告", "功能覆盖率", "功能测试100%覆盖过往问题库、PTS、产品Spec、防错清单中的项目", "single_template", "TE"),
             ("QG3:AOI_COVERAGE", "贴片元件AOI测试覆盖率分析表", "ai-exist", "SMD贴片元件AOI覆盖率报告", "覆盖率", "输出元件AOI测试覆盖率分析表", "single_template", "TE"),
+            ("QG3:NEW_PROCESS_APPROVAL_REPORT", "过程特殊特性", "ai-exist", "", "", " SC清单是的管控方法验证是否可行？比如SPC管控方法的CPK能力合格", "folder_non_empty", "MP"),
         ],
         "manual": [
             ("QG3:DEFECT_RATE", "不良率", "不良率是否达标？", "PT"),
@@ -131,10 +132,6 @@ PROTOTYPE_RULE_DATA = {
 }
 
 
-def split_keywords(raw_keywords: str) -> list[str]:
-    return [keyword.strip() for keyword in raw_keywords.split("/") if keyword.strip()]
-
-
 def rule_type_from_prototype(prototype_type: str) -> tuple[str, str]:
     if prototype_type == "ai-exist":
         return "auto", "file_existence"
@@ -145,75 +142,104 @@ def rule_type_from_prototype(prototype_type: str) -> tuple[str, str]:
     return "manual", "manual"
 
 
+def prototype_business_rules_for_node(node_code: str) -> list[dict]:
+    groups = PROTOTYPE_RULE_DATA[node_code]
+    rules = []
+    sort_order = 1
+    for rule_code, item_name, prototype_type, _location, _keywords, requirement, _strategy, owner in groups["ai"]:
+        item_type, check_type = rule_type_from_prototype(prototype_type)
+        rules.append(
+            {
+                "rule_code": rule_code,
+                "item_name": item_name,
+                "item_type": item_type,
+                "check_type": check_type,
+                "checklist_requirement": requirement,
+                "owner_dept": owner,
+                "sort_order": sort_order,
+            }
+        )
+        sort_order += 1
+    for rule_code, item_name, requirement, owner in groups["manual"]:
+        rules.append(
+            {
+                "rule_code": rule_code,
+                "item_name": item_name,
+                "item_type": "manual",
+                "check_type": "manual",
+                "checklist_requirement": requirement,
+                "owner_dept": owner,
+                "sort_order": sort_order,
+            }
+        )
+        sort_order += 1
+    return rules
+
+
 def seed_prototype_rules() -> None:
-    for node_code, groups in PROTOTYPE_RULE_DATA.items():
+    for node_code in PROTOTYPE_RULE_DATA:
         qg_node = query_one("SELECT id FROM qg_nodes WHERE node_code = ?", (node_code,))
         if not qg_node:
             continue
-        if query_one("SELECT id FROM business_rule_versions WHERE qg_node_id = ? LIMIT 1", (qg_node["id"],)):
-            continue
-        version = execute(
-            """
-            INSERT INTO business_rule_versions(
-                qg_node_id, version_no, status, change_summary, published_by, published_at, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                qg_node["id"],
-                PROTOTYPE_RULE_VERSIONS[node_code],
-                "published",
-                "原型规则初始化",
-                1,
-                "2026-03-26 00:00:00",
-                1,
-            ),
-        )
-        sort_order = 1
-        for rule in groups["ai"]:
-            rule_code, item_name, prototype_type, location, keywords, requirement, strategy, owner = rule
-            item_type, check_type = rule_type_from_prototype(prototype_type)
-            rule_id = insert_prototype_business_rule(
-                version.lastrowid,
-                qg_node["id"],
-                rule_code,
-                item_name,
-                item_type,
-                check_type,
-                requirement,
-                owner,
-                sort_order,
+        version = get_or_create_prototype_rule_version(qg_node["id"], node_code)
+        existing_rule_codes = {
+            row["rule_code"]
+            for row in query_all(
+                "SELECT rule_code FROM business_check_rules WHERE business_rule_version_id = ?",
+                (version["id"],),
             )
-            insert_prototype_execution_rule(
-                rule_id,
-                rule_code,
-                check_type,
-                {
-                    "mock": True,
-                    "source": "prototype",
-                    "location": location,
-                    "keywords": split_keywords(keywords),
-                    "strategy": strategy,
-                },
-            )
-            sort_order += 1
-        for rule_code, item_name, requirement, owner in groups["manual"]:
+        }
+        for rule in prototype_business_rules_for_node(node_code):
+            if rule["rule_code"] in existing_rule_codes:
+                continue
             insert_prototype_business_rule(
-                version.lastrowid,
-                qg_node["id"],
-                rule_code,
-                item_name,
-                "manual",
-                "manual",
-                requirement,
-                owner,
-                sort_order,
+                version["id"],
+                rule["rule_code"],
+                rule["item_name"],
+                rule["item_type"],
+                rule["check_type"],
+                rule["checklist_requirement"],
+                rule["owner_dept"],
+                rule["sort_order"],
             )
-            sort_order += 1
+
+
+def get_or_create_prototype_rule_version(qg_node_id: int, node_code: str) -> dict:
+    version = query_one(
+        """
+        SELECT * FROM business_rule_versions
+        WHERE qg_node_id = ?
+        ORDER BY
+            CASE status WHEN 'published' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
+            published_at DESC,
+            id DESC
+        LIMIT 1
+        """,
+        (qg_node_id,),
+    )
+    if version:
+        return version
+    result = execute(
+        """
+        INSERT INTO business_rule_versions(
+            qg_node_id, version_no, status, change_summary, published_by, published_at, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            qg_node_id,
+            PROTOTYPE_RULE_VERSIONS[node_code],
+            "published",
+            "原型业务规则初始化",
+            1,
+            "2026-03-26 00:00:00",
+            1,
+        ),
+    )
+    return query_one("SELECT * FROM business_rule_versions WHERE id = ?", (result.lastrowid,))
 
 
 def insert_prototype_business_rule(
     version_id: int,
-    qg_node_id: int,
     rule_code: str,
     item_name: str,
     item_type: str,
@@ -241,24 +267,6 @@ def insert_prototype_business_rule(
         ),
     )
     return int(result.lastrowid)
-
-
-def insert_prototype_execution_rule(rule_id: int, rule_code: str, check_type: str, config: dict) -> None:
-    execute(
-        """
-        INSERT INTO auto_check_execution_rules(
-            business_check_rule_id, execution_mode, adapter_type,
-            config_json, is_enabled, created_by
-        ) VALUES (?, ?, ?, ?, 1, ?)
-        """,
-        (
-            rule_id,
-            check_type,
-            "mock_system" if check_type == "system_direct" else "vdrive",
-            to_json(config),
-            1,
-        ),
-    )
 
 
 def seed_database() -> None:
