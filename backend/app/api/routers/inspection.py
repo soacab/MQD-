@@ -10,6 +10,7 @@ from app.api.schemas.inspection import (
     ConvertToManualRequest,
     CreateInspectionTaskRequest,
     PrepareInspectionTaskRequest,
+    SelectCandidateFileRequest,
     VoidTaskRequest,
 )
 from app.services import inspection_service
@@ -60,6 +61,26 @@ def get_inspection_item(item_id: int, user: dict = Depends(current_user)) -> dic
 @router.post("/api/v1/inspection-items/{item_id}/convert-to-manual")
 def convert_to_manual(item_id: int, payload: ConvertToManualRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
     return ok(inspection_service.convert_to_manual(item_id, request_dict(payload), user))
+
+
+@router.post("/api/v1/inspection-items/{item_id}/candidate-files/scan")
+def scan_candidate_files(item_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.scan_candidate_files(item_id, user))
+
+
+@router.get("/api/v1/inspection-items/{item_id}/candidate-files")
+def list_candidate_files(item_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.list_candidate_files(item_id, user))
+
+
+@router.post("/api/v1/inspection-items/{item_id}/candidate-files/select")
+def select_candidate_file(item_id: int, payload: SelectCandidateFileRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.select_candidate_file(item_id, request_dict(payload), user))
+
+
+@router.post("/api/v1/inspection-items/{item_id}/auto-check/retry")
+def retry_auto_check(item_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.retry_auto_check(item_id, user))
 
 
 @router.post("/api/v1/inspection-items/{item_id}/confirm")

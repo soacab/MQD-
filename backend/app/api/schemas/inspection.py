@@ -29,6 +29,10 @@ class ConvertToManualRequest(StrictRequest):
     reason: str | None = None
 
 
+class SelectCandidateFileRequest(StrictRequest):
+    candidate_file_id: int
+
+
 class ConfirmItemRequest(StrictRequest):
     decision_result: Literal["pass", "fail", "conditional", "na"] | None = None
     decision_text: str | None = None

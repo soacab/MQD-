@@ -282,6 +282,35 @@ export type InspectionItem = {
   auto_check_results?: Array<Record<string, unknown>>;
 };
 
+export type AutoCheckCandidateFile = {
+  id: number;
+  auto_check_result_id: number;
+  vdrive_file_id?: number | null;
+  file_guid?: string | null;
+  file_name: string;
+  file_ext?: string | null;
+  file_path?: string | null;
+  file_size?: number | null;
+  file_version?: string | null;
+  created_time?: string | null;
+  modified_time?: string | null;
+  recommend_score?: number | null;
+  recommend_reason?: string | null;
+  is_recommended: boolean;
+  is_selected: boolean;
+};
+
+export type AutoCheckResult = {
+  id: number;
+  inspection_item_id: number;
+  attempt_no: number;
+  is_latest: boolean;
+  auto_status: string;
+  auto_result?: string | null;
+  evidence_text?: string | null;
+  candidate_files: AutoCheckCandidateFile[];
+};
+
 export type Report = {
   id: number;
   inspection_task_id: number;
@@ -656,6 +685,29 @@ export function convertInspectionItemToManual(itemId: number, reason: string) {
   return apiRequest<InspectionItem>(`/api/v1/inspection-items/${itemId}/convert-to-manual`, {
     method: "POST",
     body: jsonBody({ reason })
+  });
+}
+
+export function scanCandidateFiles(itemId: number) {
+  return apiRequest<AutoCheckResult>(`/api/v1/inspection-items/${itemId}/candidate-files/scan`, {
+    method: "POST"
+  });
+}
+
+export function listCandidateFiles(itemId: number) {
+  return apiRequest<ListResult<AutoCheckCandidateFile>>(`/api/v1/inspection-items/${itemId}/candidate-files`);
+}
+
+export function selectCandidateFile(itemId: number, candidate_file_id: number) {
+  return apiRequest<AutoCheckResult>(`/api/v1/inspection-items/${itemId}/candidate-files/select`, {
+    method: "POST",
+    body: jsonBody({ candidate_file_id })
+  });
+}
+
+export function retryAutoCheck(itemId: number) {
+  return apiRequest<AutoCheckResult>(`/api/v1/inspection-items/${itemId}/auto-check/retry`, {
+    method: "POST"
   });
 }
 

@@ -73,6 +73,7 @@ class AutoCheckStatus(StrEnum):
     FAILED = "failed"
     CANDIDATE_WAITING = "candidate_waiting"
     MANUAL_REQUIRED = "manual_required"
+    ERROR = "error"
 
 
 class AutoCheckResult(StrEnum):

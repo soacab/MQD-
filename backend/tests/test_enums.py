@@ -29,7 +29,7 @@ class EnumCoverageTest(unittest.TestCase):
 
         self.assertEqual(
             {status.value for status in AutoCheckStatus},
-            {"success", "failed", "candidate_waiting", "manual_required"},
+            {"success", "failed", "candidate_waiting", "manual_required", "error"},
         )
 
     def test_auto_check_result_is_separate_from_final_result(self):

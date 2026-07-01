@@ -512,6 +512,48 @@ def convert_to_manual(item_id: int, payload: dict[str, Any], user: dict[str, Any
     return query_one("SELECT * FROM inspection_items WHERE id = ?", (item_id,))
 
 
+def ensure_item_auto_checkable(item: dict[str, Any]) -> None:
+    if item["status"] in (InspectionItemStatus.CONFIRMED, InspectionItemStatus.INHERITED):
+        raise BusinessError("ITEM_NOT_AUTO_CHECKABLE", "已确认或继承检查项不能重新自动检查")
+
+
+def scan_candidate_files(item_id: int, user: dict[str, Any]) -> dict[str, Any]:
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
+    item = require_item_scope(user, item_id)
+    ensure_item_mutable(item)
+    ensure_item_auto_checkable(item)
+    result = ai_execution_service.scan_candidate_files(item)
+    audit("scan_candidate_files", "inspection_item", item_id, user["id"], {"auto_check_result_id": result["id"]})
+    return result
+
+
+def list_candidate_files(item_id: int, user: dict[str, Any]) -> dict[str, Any]:
+    require_item_scope(user, item_id)
+    return {"items": ai_execution_service.list_latest_candidate_files(item_id)}
+
+
+def select_candidate_file(item_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
+    item = require_item_scope(user, item_id)
+    ensure_item_mutable(item)
+    candidate_file_id = payload.get("candidate_file_id")
+    if not candidate_file_id:
+        raise BusinessError("CANDIDATE_FILE_REQUIRED", "候选文件 ID 必填")
+    result = ai_execution_service.select_candidate_file(item, int(candidate_file_id))
+    audit("select_candidate_file", "inspection_item", item_id, user["id"], {"candidate_file_id": candidate_file_id})
+    return result
+
+
+def retry_auto_check(item_id: int, user: dict[str, Any]) -> dict[str, Any]:
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
+    item = require_item_scope(user, item_id)
+    ensure_item_mutable(item)
+    ensure_item_auto_checkable(item)
+    result = ai_execution_service.scan_candidate_files(item)
+    audit("retry_auto_check", "inspection_item", item_id, user["id"], {"auto_check_result_id": result["id"]})
+    return result
+
+
 def confirm_item(item_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
     item = require_item_scope(user, item_id)
@@ -766,7 +808,6 @@ def trigger_recheck(task_id: int, user: dict[str, Any]) -> dict[str, Any]:
 def list_auto_check_results(item_id: int, user: dict[str, Any]) -> dict[str, Any]:
     require_item_scope(user, item_id)
     rows = query_all("SELECT * FROM auto_check_results WHERE inspection_item_id = ? ORDER BY attempt_no", (item_id,))
-    for row in rows:
-        row["execution_rule_snapshot"] = from_json(row["execution_rule_snapshot"], {})
-        row["raw_result_json"] = from_json(row["raw_result_json"], {})
+    for index, row in enumerate(rows):
+        rows[index] = ai_execution_service.serialize_auto_check_result(row)
     return {"items": rows}

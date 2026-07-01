@@ -66,6 +66,14 @@ class Settings:
     def iam_redirect_uri(self) -> str:
         return os.getenv("CHECKFLOW_IAM_REDIRECT_URI", "")
 
+    @property
+    def vdrive_base_url(self) -> str:
+        return os.getenv("CHECKFLOW_VDRIVE_BASE_URL", "").rstrip("/")
+
+    @property
+    def vdrive_token(self) -> str:
+        return os.getenv("CHECKFLOW_VDRIVE_TOKEN", "")
+
     def validate_startup(self) -> None:
         _ = self.jwt_secret
 
