@@ -38,6 +38,7 @@ def rule_version_change_details(version_id: int) -> list[dict[str, Any]]:
             {
                 "rule_code": rule["rule_code"],
                 "item_name": rule["item_name"],
+                "item_type": rule["item_type"],
                 "change_type": "disabled" if not rule["is_active"] else "added",
                 "change_summary": "停用检查项" if not rule["is_active"] else "新增或保留检查项",
             }
@@ -186,11 +187,38 @@ def prepare_editable_rule_version(qg_node_id: int, user: dict[str, Any]) -> dict
     return rule_version_detail(draft_id)
 
 
+def next_business_rule_code(version_id: int) -> str:
+    prefix = f"BR-{version_id}-"
+    rows = query_all(
+        "SELECT rule_code FROM business_check_rules WHERE business_rule_version_id = ? AND rule_code LIKE ?",
+        (version_id, f"{prefix}%"),
+    )
+    suffixes = []
+    for row in rows:
+        suffix = row["rule_code"].removeprefix(prefix)
+        if suffix.isdigit():
+            suffixes.append(int(suffix))
+    return f"{prefix}{max(suffixes, default=0) + 1:04d}"
+
+
+def next_business_rule_sort_order(version_id: int) -> int:
+    row = query_one(
+        "SELECT MAX(sort_order) AS max_sort_order FROM business_check_rules WHERE business_rule_version_id = ?",
+        (version_id,),
+    )
+    return int(row["max_sort_order"] or 0) + 1
+
+
 def create_business_rule(version_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.RULES_ADMIN})
     version = row_or_404("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,), "RULE_VERSION_NOT_FOUND", "规则版本不存在")
     if version["status"] != RuleVersionStatus.DRAFT:
         raise BusinessError("RULE_VERSION_NOT_DRAFT", "只有草稿规则版本可编辑")
+    item_type = payload.get("item_type", RuleItemType.MANUAL)
+    check_type = payload.get("check_type", RuleItemType.MANUAL)
+    sort_order = payload.get("sort_order")
+    if sort_order is None:
+        sort_order = next_business_rule_sort_order(version_id)
     cur = execute(
         """
         INSERT INTO business_check_rules(
@@ -200,15 +228,15 @@ def create_business_rule(version_id: int, payload: dict[str, Any], user: dict[st
         """,
         (
             version_id,
-            payload["rule_code"],
+            payload.get("rule_code") or next_business_rule_code(version_id),
             payload["item_name"],
-            payload["item_type"],
-            payload["check_type"],
+            item_type,
+            check_type,
             payload.get("checklist_requirement"),
             payload.get("owner_dept"),
             1 if payload.get("is_apqp") else 0,
             1 if payload.get("is_active", True) else 0,
-            payload.get("sort_order", 0),
+            sort_order,
         ),
     )
     audit("create_business_rule", "business_check_rule", cur.lastrowid, user["id"], payload)
@@ -287,15 +315,6 @@ def publish_rule_version(version_id: int, payload: dict | None, user: dict[str, 
     version = row_or_404("SELECT * FROM business_rule_versions WHERE id = ?", (version_id,), "RULE_VERSION_NOT_FOUND", "规则版本不存在")
     if version["status"] != RuleVersionStatus.DRAFT:
         raise BusinessError("RULE_VERSION_NOT_DRAFT", "只有草稿版本可发布")
-    rules = query_all("SELECT * FROM business_check_rules WHERE business_rule_version_id = ? AND is_active = 1", (version_id,))
-    for rule in rules:
-        if rule["item_type"] in (RuleItemType.AUTO, RuleItemType.SYSTEM):
-            execution = query_one(
-                "SELECT id FROM auto_check_execution_rules WHERE business_check_rule_id = ? AND is_enabled = 1",
-                (rule["id"],),
-            )
-            if not execution:
-                raise BusinessError("AUTO_RULE_MISSING_EXECUTION", "自动检查项缺少启用的执行规则")
     with transaction():
         execute(
             "UPDATE business_rule_versions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE qg_node_id = ? AND status = ?",

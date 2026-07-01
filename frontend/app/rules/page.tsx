@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   createBusinessRule,
-  createExecutionRule,
   getCurrentUser,
   getRuleVersion,
   listQGNodes,
@@ -18,14 +17,10 @@ import {
 } from "@/lib/api";
 
 const emptyRuleForm = {
-  rule_code: "",
   item_name: "",
-  item_type: "manual",
-  check_type: "manual",
   checklist_requirement: "",
   owner_dept: "MQD",
-  is_apqp: "false",
-  sort_order: "1",
+  is_apqp: "true",
   is_active: "true"
 };
 
@@ -68,16 +63,53 @@ function versionStatusLabel(status: string) {
   return status;
 }
 
+function selectPreferredRuleVersion(versions: RuleVersion[], preferredVersionId?: number) {
+  return (
+    (preferredVersionId ? versions.find((version) => version.id === preferredVersionId) : null) ||
+    versions.find((version) => version.status === "draft") ||
+    versions.find((version) => version.is_current) ||
+    versions[0] ||
+    null
+  );
+}
+
+function ruleCategoryLabel(itemType?: string | null) {
+  if (itemType === "manual") {
+    return "人工检查项";
+  }
+  if (itemType === "auto") {
+    return "自动检查项";
+  }
+  if (itemType === "system") {
+    return "系统直连检查项";
+  }
+  if (itemType === "inherit") {
+    return "继承检查项";
+  }
+  return "检查项";
+}
+
+function changeTypeLabel(changeType: string) {
+  if (changeType === "disabled") {
+    return "停用";
+  }
+  if (changeType === "added") {
+    return "新增";
+  }
+  return "变更";
+}
+
+function formatRuleChangeLine(item: { item_name: string; item_type?: string | null; change_type: string; change_summary?: string | null }) {
+  const summary = item.change_summary ? `（${item.change_summary}）` : "";
+  return `${changeTypeLabel(item.change_type)}${ruleCategoryLabel(item.item_type)}：${item.item_name}${summary}`;
+}
+
 function ruleFormFromRule(rule: BusinessRule) {
   return {
-    rule_code: rule.rule_code,
     item_name: rule.item_name,
-    item_type: rule.item_type,
-    check_type: rule.check_type,
     checklist_requirement: rule.checklist_requirement || "",
     owner_dept: rule.owner_dept || "",
     is_apqp: asBoolean(rule.is_apqp) ? "true" : "false",
-    sort_order: String(rule.sort_order ?? 0),
     is_active: asBoolean(rule.is_active) ? "true" : "false"
   };
 }
@@ -87,6 +119,7 @@ export default function RulesPage() {
   const [versions, setVersions] = useState<RuleVersion[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<RuleVersion | null>(null);
+  const [nodeRuleCounts, setNodeRuleCounts] = useState<Record<number, number>>({});
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<"auto" | "manual">("auto");
   const [ruleForm, setRuleForm] = useState(emptyRuleForm);
@@ -110,8 +143,8 @@ export default function RulesPage() {
 
   const draftChangeDetails =
     selectedVersion?.business_check_rules?.map((rule) => ({
-      rule_code: rule.rule_code,
       item_name: rule.item_name,
+      item_type: rule.item_type,
       change_type: asBoolean(rule.is_active) ? "added" : "disabled"
     })) || [];
 
@@ -128,16 +161,33 @@ export default function RulesPage() {
   async function loadNode(qgNodeId: number, preferredVersionId?: number) {
     const versionRows = await listRuleVersions(qgNodeId);
     setVersions(versionRows.items);
-    const preferred =
-      (preferredVersionId ? versionRows.items.find((version) => version.id === preferredVersionId) : null) ||
-      versionRows.items.find((version) => version.status === "draft") ||
-      versionRows.items.find((version) => version.is_current) ||
-      versionRows.items[0];
+    const preferred = selectPreferredRuleVersion(versionRows.items, preferredVersionId);
     if (preferred) {
-      setSelectedVersion(await getRuleVersion(preferred.id));
+      const detail = await getRuleVersion(preferred.id);
+      setSelectedVersion(detail);
+      setNodeRuleCounts((current) => ({
+        ...current,
+        [qgNodeId]: detail.business_check_rules?.length || 0
+      }));
     } else {
       setSelectedVersion(null);
+      setNodeRuleCounts((current) => ({ ...current, [qgNodeId]: 0 }));
     }
+  }
+
+  async function loadNodeRuleCounts(nodeRows: QGNode[]) {
+    const entries = await Promise.all(
+      nodeRows.map(async (node) => {
+        const versionRows = await listRuleVersions(node.id);
+        const preferred = selectPreferredRuleVersion(versionRows.items);
+        if (!preferred) {
+          return [node.id, 0] as const;
+        }
+        const detail = await getRuleVersion(preferred.id);
+        return [node.id, detail.business_check_rules?.length || 0] as const;
+      })
+    );
+    setNodeRuleCounts(Object.fromEntries(entries));
   }
 
   useEffect(() => {
@@ -146,6 +196,7 @@ export default function RulesPage() {
         const [me, nodeRows] = await Promise.all([getCurrentUser(), listQGNodes()]);
         setCurrentUser(me);
         setNodes(nodeRows.items);
+        await loadNodeRuleCounts(nodeRows.items);
         const firstNodeId = nodeRows.items[0]?.id ?? null;
         setSelectedNodeId(firstNodeId);
         if (firstNodeId) {
@@ -180,26 +231,25 @@ export default function RulesPage() {
     setSelectedVersion(draft);
     const versionRows = await listRuleVersions(selectedNodeId);
     setVersions(versionRows.items);
+    setNodeRuleCounts((current) => ({
+      ...current,
+      [selectedNodeId]: draft.business_check_rules?.length || 0
+    }));
     const copiedRule = rule ? draft.business_check_rules?.find((item) => item.rule_code === rule.rule_code) : undefined;
     setMessage("已准备可编辑规则版本，保存后发布规则版本才会影响新建任务。");
     return { version: draft, rule: copiedRule };
   }
 
-  async function openCreateRuleModal(type: "auto" | "manual" = "manual") {
+  async function openCreateRuleModal() {
     if (!canManageRules) {
       setMessage("只读模式：规则管理员可编辑，其他用户只能查看。");
       return;
     }
     try {
-      const { version } = await ensureEditableVersion();
+      await ensureEditableVersion();
       setEditingRuleId(null);
       setRuleModalReadonly(false);
-      setRuleForm({
-        ...emptyRuleForm,
-        item_type: type,
-        check_type: type === "auto" ? "file_existence" : "manual",
-        sort_order: String((version.business_check_rules?.length || 0) + 1)
-      });
+      setRuleForm(emptyRuleForm);
       setRuleModalOpen(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "准备编辑版本失败");
@@ -238,31 +288,24 @@ export default function RulesPage() {
     }
     try {
       const payload = {
-        ...ruleForm,
+        item_name: ruleForm.item_name,
+        checklist_requirement: ruleForm.checklist_requirement,
+        owner_dept: ruleForm.owner_dept,
         is_apqp: ruleForm.is_apqp === "true",
-        is_active: ruleForm.is_active === "true",
-        sort_order: Number(ruleForm.sort_order || 0)
+        is_active: ruleForm.is_active === "true"
       };
-      const existingRule = editingRuleId
-        ? selectedVersion.business_check_rules?.find((rule) => rule.id === editingRuleId)
-        : null;
-      const savedRule = editingRuleId
-        ? await updateBusinessRule(editingRuleId, payload)
-        : await createBusinessRule(selectedVersion.id, payload);
-      const needsDefaultExecutionRule =
-        (savedRule.item_type === "auto" || savedRule.item_type === "system") &&
-        (!editingRuleId || !(existingRule?.auto_check_execution_rules || []).length);
-      if (needsDefaultExecutionRule) {
-        await createExecutionRule(savedRule.id, {
-          execution_mode: savedRule.item_type === "system" ? "system_direct" : "file_existence",
-          adapter_type: savedRule.item_type === "system" ? "mock_system" : "vdrive",
-          is_enabled: true,
-          config_json: { mock: true }
-        });
+      const wasCreating = !editingRuleId;
+      if (editingRuleId) {
+        await updateBusinessRule(editingRuleId, payload);
+      } else {
+        await createBusinessRule(selectedVersion.id, payload);
+      }
+      if (wasCreating) {
+        setActiveTab("manual");
       }
       setRuleModalOpen(false);
       setEditingRuleId(null);
-      setMessage(editingRuleId ? "检查项已更新，发布规则版本后生效。" : "检查项已新增，发布规则版本后生效。");
+      setMessage(editingRuleId ? "检查项已更新，发布规则版本后生效。" : "人工检查项已新增，发布规则版本后生效。");
       await loadNode(selectedVersion.qg_node_id, selectedVersion.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存检查项失败");
@@ -342,7 +385,7 @@ export default function RulesPage() {
       {message ? <p className="notice">{message}</p> : null}
       {!canManageRules ? <p className="notice">只读模式：规则管理员可编辑，当前用户只能查看规则配置和版本历史。</p> : null}
       <p className="field-governance-note">
-        字段治理：规则配置按方案 4.8 展示检查项名称、检查类型、Checklist 要求、责任方、APQP、状态和版本历史；接口中的执行配置只作为规则详情来源，不扩展成未确认 UI 字段。
+        字段治理：规则配置按方案 4.8 展示检查项名称、检查类型、Checklist 要求、责任方、APQP、状态和版本历史；执行配置不在规则配置页展示或隐式补写。
       </p>
 
       <section className="rules-board">
@@ -356,7 +399,7 @@ export default function RulesPage() {
               onClick={() => void handleSelectNode(node.id)}
             >
               <span>{node.node_code}</span>
-              <strong>{node.id === selectedNodeId ? rules.length : "-"}</strong>
+              <strong>{nodeRuleCounts[node.id] ?? 0}</strong>
             </button>
           ))}
         </aside>
@@ -370,8 +413,8 @@ export default function RulesPage() {
               </div>
               <p>{selectedVersionMeta}</p>
             </div>
-            <button type="button" disabled={!canManageRules} onClick={() => void openCreateRuleModal("manual")}>
-              + 新增检查项
+            <button type="button" disabled={!canManageRules} onClick={() => void openCreateRuleModal()}>
+              + 新增人工检查项
             </button>
           </div>
 
@@ -453,9 +496,9 @@ export default function RulesPage() {
                   </button>
                   {expandedHistoryId === version.id ? (
                     <ul className="plain-list">
-                      {(version.change_details || []).map((item) => (
-                        <li key={`${version.id}-${item.rule_code}`}>
-                          {item.rule_code}：{item.item_name}（{item.change_type}）{item.change_summary ? ` - ${item.change_summary}` : ""}
+                      {(version.change_details || []).map((item, index) => (
+                        <li key={`${version.id}-${item.item_name}-${index}`}>
+                          {formatRuleChangeLine(item)}
                         </li>
                       ))}
                     </ul>
@@ -469,28 +512,15 @@ export default function RulesPage() {
       ) : null}
 
       {ruleModalOpen ? (
-        <div className="rules-modal-backdrop" role="dialog" aria-modal="true" aria-label={ruleModalReadonly ? "检查项详情" : editingRuleId ? "编辑检查项" : "新增检查项"}>
+        <div className="rules-modal-backdrop" role="dialog" aria-modal="true" aria-label={ruleModalReadonly ? "检查项详情" : editingRuleId ? "编辑检查项" : "新增人工检查项"}>
           <form className="rules-modal" onSubmit={handleSaveRule}>
             <header>
-              <h2>{ruleModalReadonly ? "检查项详情" : editingRuleId ? "编辑检查项" : "新增检查项"}</h2>
+              <h2>{ruleModalReadonly ? "检查项详情" : editingRuleId ? "编辑检查项" : "新增人工检查项"}</h2>
               <button type="button" onClick={() => setRuleModalOpen(false)}>×</button>
             </header>
             <label>
-              检查项编码
-              <input value={ruleForm.rule_code} onChange={(event) => setRuleForm({ ...ruleForm, rule_code: event.target.value })} disabled={ruleModalReadonly || Boolean(editingRuleId)} required />
-            </label>
-            <label>
               检查项名称
               <input value={ruleForm.item_name} onChange={(event) => setRuleForm({ ...ruleForm, item_name: event.target.value })} disabled={ruleModalReadonly} required />
-            </label>
-            <label>
-              类型
-              <select value={ruleForm.item_type} onChange={(event) => setRuleForm({ ...ruleForm, item_type: event.target.value, check_type: event.target.value === "auto" ? "file_existence" : event.target.value })} disabled={ruleModalReadonly}>
-                <option value="manual">人工</option>
-                <option value="auto">自动</option>
-                <option value="system">系统直连</option>
-                <option value="inherit">继承</option>
-              </select>
             </label>
             <label>
               Checklist 要求
@@ -515,10 +545,6 @@ export default function RulesPage() {
                   <option value="false">停用</option>
                 </select>
               </label>
-              <label>
-                排序
-                <input value={ruleForm.sort_order} onChange={(event) => setRuleForm({ ...ruleForm, sort_order: event.target.value })} disabled={ruleModalReadonly} />
-              </label>
             </div>
             {!ruleModalReadonly ? (
               <footer>
@@ -539,8 +565,8 @@ export default function RulesPage() {
             </header>
             <p>发布后新建任务将使用 {selectedNode?.node_code} {selectedVersion?.version_no}，进行中任务不受影响。</p>
             <ul className="plain-list">
-              {draftChangeDetails.map((item) => (
-                <li key={item.rule_code}>{item.rule_code}：{item.item_name}（{item.change_type}）</li>
+              {draftChangeDetails.map((item, index) => (
+                <li key={`${item.item_name}-${item.change_type}-${index}`}>{formatRuleChangeLine(item)}</li>
               ))}
             </ul>
             <label>

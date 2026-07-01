@@ -165,6 +165,9 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(report.json()["data"]["overall_result"], "NO_GO")
         self.assertEqual(report.json()["data"]["project"]["id"], project_id)
         self.assertEqual(len(report.json()["data"]["items"]), 2)
+        process_record = report.json()["data"]["items"][0]["process_records_json"][0]
+        self.assertIn("inspected_at", process_record)
+        self.assertTrue(process_record["inspected_at"])
 
         rectifications = self.client.get(
             f"/api/v1/rectification-items?task_id={task_data['inspection_task_id']}",
@@ -831,6 +834,72 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(history_version["published_by_name"], "系统管理员")
         self.assertTrue(history_version["is_current"])
         self.assertEqual(history_version["change_details"][0]["item_name"], "History manual item edited")
+
+    def test_business_rule_creation_defaults_to_manual_with_internal_code_and_next_sort(self):
+        version = self.client.post(
+            "/api/v1/business-rule-versions",
+            headers=self.headers,
+            json={"qg_node_id": 1, "version_no": "V-MANUAL-DEFAULT", "change_summary": "manual defaults"},
+        )
+        self.assertEqual(version.status_code, 200, version.text)
+        version_id = version.json()["data"]["id"]
+        existing_rule = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "rule_code": "EXISTING-MANUAL",
+                "item_name": "Existing manual",
+                "item_type": "manual",
+                "check_type": "manual",
+                "checklist_requirement": "Existing requirement",
+                "owner_dept": "MQD",
+                "is_apqp": False,
+                "sort_order": 5,
+            },
+        )
+        self.assertEqual(existing_rule.status_code, 200, existing_rule.text)
+
+        created = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "item_name": "Generated manual",
+                "checklist_requirement": "Generated requirement",
+                "owner_dept": "PT",
+                "is_apqp": True,
+                "is_active": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        created_data = created.json()["data"]
+        self.assertEqual(created_data["rule_code"], f"BR-{version_id}-0001")
+        self.assertEqual(created_data["item_type"], "manual")
+        self.assertEqual(created_data["check_type"], "manual")
+        self.assertEqual(created_data["sort_order"], 6)
+
+        second_created = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "item_name": "Second generated manual",
+                "checklist_requirement": "Second generated requirement",
+                "owner_dept": "TE",
+                "is_apqp": False,
+                "is_active": True,
+            },
+        )
+        self.assertEqual(second_created.status_code, 200, second_created.text)
+        second_data = second_created.json()["data"]
+        self.assertEqual(second_data["rule_code"], f"BR-{version_id}-0002")
+        self.assertEqual(second_data["sort_order"], 7)
+
+    def test_publish_rule_version_does_not_require_auto_execution_rules(self):
+        _, version_id, _auto_rule_id = self._create_project_and_rules()
+
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+
+        self.assertEqual(published.status_code, 200, published.text)
+        self.assertEqual(published.json()["data"]["status"], "published")
 
     def test_prepare_editable_rule_version_copies_current_published_rules_once(self):
         _, version_id, auto_rule_id = self._create_project_and_rules()

@@ -157,6 +157,7 @@ export type RuleVersion = {
 export type RuleChangeDetail = {
   rule_code: string;
   item_name: string;
+  item_type?: string | null;
   change_type: string;
   change_summary?: string | null;
 };
@@ -226,6 +227,9 @@ export type Report = {
   overall_result?: string | null;
   latest_round_no: number;
   business_rule_version_no: string;
+  generated_at?: string | null;
+  last_modified_at?: string | null;
+  summary_json?: Record<string, unknown>;
   project?: Project;
   qg_node?: QGNode;
   rule_snapshot?: {
@@ -239,6 +243,9 @@ export type ReportItem = {
   id: number;
   source_rule_code: string;
   item_name_snapshot: string;
+  item_type_snapshot?: string | null;
+  check_type_snapshot?: string | null;
+  checklist_requirement_snapshot?: string | null;
   final_result?: string | null;
   process_records_json: Array<Record<string, unknown>>;
 };

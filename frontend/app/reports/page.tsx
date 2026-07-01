@@ -24,6 +24,13 @@ const resultLabels: Record<string, string> = {
   NO_GO: "NO-GO"
 };
 
+const itemResultLabels: Record<string, string> = {
+  pass: "满足",
+  fail: "不满足",
+  conditional: "带条件满足",
+  na: "不适用"
+};
+
 const emptyArchiveFilters = {
   keyword: "",
   mq_user_id: "",
@@ -40,6 +47,52 @@ function formatDate(value?: string | null) {
     return "-";
   }
   return value.slice(0, 10);
+}
+
+function resultLabel(value?: string | null) {
+  if (!value) {
+    return "-";
+  }
+  return resultLabels[value] || itemResultLabels[value] || value;
+}
+
+function resultClass(value?: string | null) {
+  return (value || "unknown").toLowerCase().replaceAll("_", "-");
+}
+
+function recordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return String(value);
+}
+
+function recordActor(record: Record<string, unknown>) {
+  return record.decided_by ? "点检工程师" : "CheckFlow 系统判定";
+}
+
+function countReportResults(items: Report["items"] = []) {
+  return items.reduce(
+    (counts, item) => {
+      if (item.final_result === "pass") {
+        counts.pass += 1;
+      } else if (item.final_result === "fail") {
+        counts.fail += 1;
+      } else if (item.final_result === "conditional") {
+        counts.conditional += 1;
+      } else if (item.final_result === "na") {
+        counts.na += 1;
+      }
+      return counts;
+    },
+    { pass: 0, fail: 0, conditional: 0, na: 0 }
+  );
+}
+
+function resolveDefaultArchiveFilters(me: User, userOptions: BusinessUserOption[]) {
+  const currentUserOption = userOptions.find((option) => option.id === me.id);
+  return currentUserOption ? { ...emptyArchiveFilters, mq_user_id: String(me.id) } : { ...emptyArchiveFilters };
 }
 
 function escapeExcelCell(value: unknown) {
@@ -90,6 +143,8 @@ export default function ReportsPage() {
   const page = Number(archiveFilters.page || "1");
   const pageSize = Number(archiveFilters.page_size || "10");
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const reportItems = selectedReport?.items || [];
+  const reportCounts = countReportResults(reportItems);
 
   async function refresh(filters = archiveFilters) {
     try {
@@ -105,20 +160,22 @@ export default function ReportsPage() {
     }
   }
 
-  async function loadOptions() {
+  async function loadOptionsAndArchive() {
     try {
       const [nodeRows, userRows, me] = await Promise.all([listQGNodes(), listBusinessUserOptions(), getCurrentUser()]);
       setQgNodes(nodeRows.items);
       setUsers(userRows.items);
       setCurrentUser(me);
+      const nextFilters = resolveDefaultArchiveFilters(me, userRows.items);
+      setArchiveFilters(nextFilters);
+      await refresh(nextFilters);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "筛选选项加载失败");
     }
   }
 
   useEffect(() => {
-    void refresh();
-    void loadOptions();
+    void loadOptionsAndArchive();
   }, []);
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
@@ -202,24 +259,24 @@ export default function ReportsPage() {
       return;
     }
     if (deleteConfirmName !== selectedProject.project_name) {
-      setMessage("请手动输入项目名称确认删除。");
+      setMessage("请手动输入项目名称确认作废/隐藏。");
       return;
     }
     try {
       await deleteProject(selectedProject.id, {
         confirm_project_name: deleteConfirmName,
-        delete_reason: "检查档案项目详情删除"
+        delete_reason: "检查档案项目详情作废/隐藏"
       });
       setSelectedProject(null);
       setDeleteConfirmName("");
       try {
         const refreshed = await refresh();
-        setMessage(refreshed ? "项目已删除。" : "项目已删除，但档案列表刷新失败。");
+        setMessage(refreshed ? "项目已作废/隐藏。" : "项目已作废/隐藏，但档案列表刷新失败。");
       } catch {
-        setMessage("项目已删除，但档案列表刷新失败。");
+        setMessage("项目已作废/隐藏，但档案列表刷新失败。");
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "项目删除失败");
+      setMessage(error instanceof Error ? error.message : "项目作废/隐藏失败");
     }
   }
 
@@ -237,7 +294,7 @@ export default function ReportsPage() {
         row.models.join("、") || "-",
         formatDate(row.project_created_at),
         row.qg_node.node_code,
-        resultLabels[row.overall_result] || row.overall_result,
+        resultLabel(row.overall_result),
         formatDate(row.report_last_modified_at),
         row.mq_user_name || "-"
       ]);
@@ -254,9 +311,6 @@ export default function ReportsPage() {
 
   return (
     <main className="page archive-shell">
-      <p className="field-governance-note">
-        字段治理：检查档案列表字段按方案 4.7 与原型对齐；接口中的内部 ID、规则快照 JSON 和未完成更正能力不作为正式展示字段。
-      </p>
       <form className="archive-toolbar" onSubmit={handleSearch}>
         <input
           aria-label="项目名称或机型"
@@ -360,8 +414,8 @@ export default function ReportsPage() {
                     <span className="archive-node-link">{row.qg_node.node_code}</span>
                   </td>
                   <td>
-                    <span className={`archive-result-pill ${row.overall_result.toLowerCase().replace("_", "-")}`}>
-                      {resultLabels[row.overall_result] || row.overall_result}
+                    <span className={`archive-result-pill ${resultClass(row.overall_result)}`}>
+                      {resultLabel(row.overall_result)}
                     </span>
                   </td>
                   <td>{formatDate(row.report_last_modified_at)}</td>
@@ -493,7 +547,7 @@ export default function ReportsPage() {
 
               {canManageProjects ? (
                 <div className="archive-delete-box">
-                  <p>删除项目后，普通检查档案列表不再展示该项目。</p>
+                  <p>作废/隐藏项目后，普通检查档案列表不再展示该项目。</p>
                   <input
                     aria-label="手动输入项目名称"
                     placeholder={`手动输入项目名称：${selectedProject.project_name}`}
@@ -501,7 +555,7 @@ export default function ReportsPage() {
                     onChange={(event) => setDeleteConfirmName(event.target.value)}
                   />
                   <button type="button" onClick={() => void handleDeleteProject()} disabled={deleteConfirmName !== selectedProject.project_name}>
-                    删除项目
+                    作废/隐藏项目
                   </button>
                 </div>
               ) : null}
@@ -512,7 +566,7 @@ export default function ReportsPage() {
 
       {selectedReport ? (
         <div className="archive-modal-backdrop" role="dialog" aria-modal="true" aria-label="报告摘要">
-          <section className="archive-modal compact">
+          <section className="archive-modal report">
             <header>
               <div>
                 <h2>报告</h2>
@@ -523,13 +577,89 @@ export default function ReportsPage() {
               </button>
             </header>
             <div className="archive-modal-body">
-              <div className="stack">
-                <p>项目：{selectedReport.project?.project_name || selectedReport.project_id}</p>
-                <p>QG 节点：{selectedReport.qg_node?.node_code || selectedReport.qg_node_id}</p>
-                <p>综合结论：{resultLabels[selectedReport.overall_result || ""] || selectedReport.overall_result || "-"}</p>
-                <p>规则版本：{selectedReport.business_rule_version_no}</p>
-                <p>检查项：{selectedReport.items?.length || 0} 项</p>
+              <div className="archive-report-summary">
+                <div className="archive-report-result">
+                  <span>综合结论</span>
+                  <strong className={`archive-result-pill ${resultClass(selectedReport.overall_result)}`}>
+                    {resultLabel(selectedReport.overall_result)}
+                  </strong>
+                </div>
+                <div>
+                  <span>项目名称</span>
+                  <strong>{selectedReport.project?.project_name || selectedReport.project_id}</strong>
+                </div>
+                <div>
+                  <span>节点</span>
+                  <strong>{selectedReport.qg_node?.node_code || selectedReport.qg_node_id}</strong>
+                </div>
+                <div>
+                  <span>报告生成时间</span>
+                  <strong>{formatDate(selectedReport.generated_at)}</strong>
+                </div>
+                <div>
+                  <span>规则版本</span>
+                  <strong>{selectedReport.business_rule_version_no}</strong>
+                </div>
+                <div>
+                  <span>最近修改时间</span>
+                  <strong>{formatDate(selectedReport.last_modified_at)}</strong>
+                </div>
               </div>
+
+              <section className="archive-report-progress" aria-label="检查项结论进度">
+                <div className="archive-section-label">检查项结论进度</div>
+                <div className="archive-report-counts">
+                  <span>满足 <strong>{reportCounts.pass}</strong></span>
+                  <span>不满足 <strong>{reportCounts.fail}</strong></span>
+                  <span>带条件满足 <strong>{reportCounts.conditional}</strong></span>
+                  <span>不适用 <strong>{reportCounts.na}</strong></span>
+                </div>
+              </section>
+
+              <section className="archive-report-items" aria-label="检查项明细">
+                <div className="archive-section-label">检查项明细</div>
+                {reportItems.length ? (
+                  reportItems.map((item) => (
+                    <article className="archive-report-item" key={item.id}>
+                      <header>
+                        <div>
+                          <h3>{item.item_name_snapshot}</h3>
+                          <p>{item.item_type_snapshot || item.check_type_snapshot || "-"}</p>
+                        </div>
+                        <span className={`archive-item-result ${resultClass(item.final_result)}`}>{resultLabel(item.final_result)}</span>
+                      </header>
+                      <dl>
+                        <div>
+                          <dt>Checklist要求</dt>
+                          <dd>{item.checklist_requirement_snapshot || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt>检查总轮次</dt>
+                          <dd>{item.process_records_json.length} 轮</dd>
+                        </div>
+                      </dl>
+                      <div className="archive-process-list">
+                        <div className="archive-section-label">过程记录</div>
+                        {item.process_records_json.length ? (
+                          item.process_records_json.map((record, index) => (
+                            <div className="archive-process-row" key={`${item.id}-${index}`}>
+                              <span>第{recordValue(record, "round_no")}轮</span>
+                              <span>{formatDate(recordValue(record, "inspected_at"))}</span>
+                              <span>{resultLabel(recordValue(record, "final_result"))}</span>
+                              <span>{recordActor(record)}</span>
+                              <p>{recordValue(record, "decision_text")}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="archive-process-empty">暂无过程记录</p>
+                        )}
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="archive-process-empty">暂无检查项明细</p>
+                )}
+              </section>
             </div>
           </section>
         </div>

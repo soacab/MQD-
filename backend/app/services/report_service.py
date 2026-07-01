@@ -11,6 +11,8 @@ def latest_decision(item_id: int) -> dict[str, Any] | None:
 
 def update_after_archive(task_id: int, round_row: dict[str, Any], items: list[dict[str, Any]], overall_result: str) -> dict[str, Any]:
     report = query_one("SELECT * FROM inspection_reports WHERE inspection_task_id = ?", (task_id,))
+    archived_round = query_one("SELECT * FROM inspection_rounds WHERE id = ?", (round_row["id"],)) or round_row
+    inspected_at = archived_round.get("archived_at") or round_row.get("archived_at") or round_row.get("started_at")
     execute(
         """
         UPDATE inspection_reports SET overall_result = ?, latest_round_no = ?,
@@ -27,6 +29,7 @@ def update_after_archive(task_id: int, round_row: dict[str, Any], items: list[di
         decision = latest_decision(item["id"])
         process_record = {
             "round_no": round_row["round_no"],
+            "inspected_at": inspected_at,
             "inspection_item_id": item["id"],
             "final_result": item["final_result"],
             "decision_text": decision["decision_text"] if decision else None,

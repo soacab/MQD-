@@ -254,7 +254,6 @@ describe("frontend structure", () => {
 
     for (const snippet of [
       "is_apqp",
-      "sort_order",
       "is_active",
       "停用人工检查项",
       "published_by_name",
@@ -263,10 +262,33 @@ describe("frontend structure", () => {
       "draftChangeDetails",
       "确认发布规则版本",
       "当前版本",
-      "新增检查项",
+      "新增人工检查项",
       "继续编辑未发布规则变更"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
+    }
+
+    for (const forbidden of [
+      "检查项编码",
+      "排序",
+      "createExecutionRule(",
+      "await createExecutionRule",
+      "{item.rule_code}：",
+      "{ruleForm.rule_code}"
+    ]) {
+      assert.doesNotMatch(rulesPage, new RegExp(forbidden.replaceAll("(", "\\(")), `rules page should not expose ${forbidden}`);
+    }
+
+    for (const snippet of [
+      "新增人工检查项",
+      "检查项名称",
+      "Checklist 要求",
+      "责任方",
+      "APQP",
+      "状态",
+      "nodeRuleCounts"
+    ]) {
+      assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should keep ${snippet}`);
     }
   });
 
@@ -378,6 +400,8 @@ describe("frontend structure", () => {
     for (const snippet of [
       "检查档案",
       "archiveFilters",
+      "resolveDefaultArchiveFilters",
+      "me.id",
       "项目名称或机型",
       "全部QG节点",
       "全部QG结论",
@@ -394,10 +418,19 @@ describe("frontend structure", () => {
       "isAddingOrder",
       "disabled={isAddingOrder}",
       "deleteConfirmName",
-      "confirm_project_name: deleteConfirmName"
+      "confirm_project_name: deleteConfirmName",
+      "作废/隐藏项目",
+      "报告生成时间",
+      "最近修改时间",
+      "检查项结论进度",
+      "过程记录",
+      "inspected_at"
     ]) {
       assert.match(reportsPage, new RegExp(snippet.replaceAll("(", "\\(")), `reports page should contain ${snippet}`);
     }
+
+    assert.doesNotMatch(reportsPage, /field-governance-note/, "reports page should not show internal field governance copy");
+    assert.doesNotMatch(reportsPage, /删除项目/, "reports page should use void-hide copy instead of delete copy");
 
     for (const snippet of [
       ".archive-shell",
@@ -405,7 +438,9 @@ describe("frontend structure", () => {
       ".archive-table",
       ".archive-result-pill",
       ".archive-modal-backdrop",
-      ".archive-pagination"
+      ".archive-pagination",
+      ".archive-report-summary",
+      ".archive-report-item"
     ]) {
       assert.match(styles, new RegExp(snippet.replaceAll(".", "\\.")), `styles should contain ${snippet}`);
     }
@@ -507,6 +542,6 @@ describe("frontend structure", () => {
     assert.doesNotMatch(homePage, /label: "待归档"/, "home page should not create a separate archive-ready workbench section");
     assert.doesNotMatch(homePage, /label: "待整改"/, "home page should fold rectification todos into the recheck section");
     assert.match(inspectionPage, /inspector-workspace/, "inspection page should use a three-panel execution workspace");
-    assert.match(reportsPage, /field-governance-note/, "reports page should disclose unresolved field governance");
+    assert.doesNotMatch(reportsPage, /field-governance-note/, "reports page should keep internal field governance out of the archive UI");
   });
 });
