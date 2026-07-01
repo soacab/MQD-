@@ -163,6 +163,65 @@ export type RuleChangeDetail = {
   change_summary?: string | null;
 };
 
+export type RuleReleaseNodeDraft = {
+  qg_node_id: number;
+  node_code: string;
+  old_version_id?: number | null;
+  old_version_no?: string | null;
+  new_version_id: number;
+  new_version_no: string;
+  changes: RuleReleaseChange[];
+};
+
+export type RuleReleaseVersionChange = {
+  qg_node_id: number;
+  node_code: string;
+  old_version_id?: number | null;
+  old_version_no?: string | null;
+  new_version_id: number;
+  new_version_no: string;
+};
+
+export type RuleReleaseChange = RuleChangeDetail & {
+  qg_node_id: number;
+  node_code: string;
+  business_rule_version_id?: number;
+  change_details?: Array<{
+    field: string;
+    label: string;
+    old_value?: string | number | boolean | null;
+    new_value?: string | number | boolean | null;
+  }>;
+};
+
+export type RuleReleaseDraft = {
+  has_draft: boolean;
+  nodes: RuleReleaseNodeDraft[];
+  version_changes: RuleReleaseVersionChange[];
+  changes: RuleReleaseChange[];
+};
+
+export type RuleReleaseBatch = {
+  id: number;
+  batch_no: string;
+  status: string;
+  change_summary?: string | null;
+  published_by?: number | null;
+  published_at?: string | null;
+  items: Array<{
+    id: number;
+    release_batch_id: number;
+    qg_node_id: number;
+    node_code: string;
+    old_version_id?: number | null;
+    new_version_id: number;
+    old_version_no?: string | null;
+    new_version_no: string;
+    changes: RuleReleaseChange[];
+  }>;
+  changes: RuleReleaseChange[];
+};
+
 export type BusinessRule = {
   id: number;
   business_rule_version_id: number;
@@ -516,6 +575,10 @@ export function getRuleVersion(versionId: number) {
   return apiRequest<RuleVersion>(`/api/v1/business-rule-versions/${versionId}`);
 }
 
+export function getRuleReleaseDraft() {
+  return apiRequest<RuleReleaseDraft>("/api/v1/business-rule-release-draft");
+}
+
 export function createBusinessRule(versionId: number, payload: Record<string, unknown>) {
   return apiRequest<BusinessRule>(`/api/v1/business-rule-versions/${versionId}/business-check-rules`, {
     method: "POST",
@@ -539,6 +602,13 @@ export function createExecutionRule(ruleId: number, payload: Record<string, unkn
 
 export function publishRuleVersion(versionId: number, payload: { change_summary?: string } = {}) {
   return apiRequest<RuleVersion>(`/api/v1/business-rule-versions/${versionId}/publish`, {
+    method: "POST",
+    body: jsonBody(payload)
+  });
+}
+
+export function publishRuleReleaseBatch(payload: { change_summary?: string } = {}) {
+  return apiRequest<RuleReleaseBatch>("/api/v1/business-rule-release-batches/publish", {
     method: "POST",
     body: jsonBody(payload)
   });

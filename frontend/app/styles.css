@@ -2737,6 +2737,7 @@ tbody tr:hover {
 .rules-modal > label,
 .rules-modal > p,
 .rules-modal > ul,
+.rules-publish-summary,
 .rules-modal-grid,
 .rules-modal footer {
   margin-left: 24px;
@@ -2770,6 +2771,29 @@ tbody tr:hover {
 .rules-modal textarea {
   min-height: 96px;
   resize: vertical;
+}
+
+.rules-publish-summary {
+  display: grid;
+  gap: 10px;
+  border-radius: 8px;
+  background: #f3f6fa;
+  padding: 14px;
+}
+
+.rules-publish-summary h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 14px;
+}
+
+.rules-publish-node {
+  display: grid;
+  gap: 6px;
+}
+
+.rules-publish-node strong {
+  color: #253041;
 }
 
 .rules-modal-grid {

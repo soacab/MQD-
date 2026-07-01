@@ -990,6 +990,161 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(published.status_code, 200, published.text)
         self.assertEqual(published.json()["data"]["change_summary"], "QG2 rules updated from workspace")
 
+    def test_rule_release_draft_previews_all_node_drafts(self):
+        from app.core.database import execute
+
+        nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes.status_code, 200, nodes.text)
+        qg2 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG2")
+        qg4 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG4")
+
+        qg2_draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg2_draft.status_code, 200, qg2_draft.text)
+        qg2_rule = qg2_draft.json()["data"]["business_check_rules"][0]
+        edited = self.client.patch(
+            f"/api/v1/business-check-rules/{qg2_rule['id']}",
+            headers=self.headers,
+            json={"checklist_requirement": "Updated QG2 release batch requirement."},
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        removed_rule = qg2_draft.json()["data"]["business_check_rules"][1]
+        execute("DELETE FROM business_check_rules WHERE id = ?", (removed_rule["id"],))
+
+        qg4_draft = self.client.post(f"/api/v1/qg-nodes/{qg4['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg4_draft.status_code, 200, qg4_draft.text)
+        added = self.client.post(
+            f"/api/v1/business-rule-versions/{qg4_draft.json()['data']['id']}/business-check-rules",
+            headers=self.headers,
+            json={
+                "item_name": "Release batch added manual item",
+                "checklist_requirement": "Included in global release draft.",
+                "owner_dept": "MQD",
+                "is_apqp": True,
+                "is_active": True,
+            },
+        )
+        self.assertEqual(added.status_code, 200, added.text)
+
+        preview = self.client.get("/api/v1/business-rule-release-draft", headers=self.headers)
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        data = preview.json()["data"]
+        self.assertTrue(data["has_draft"])
+        self.assertEqual([item["node_code"] for item in data["nodes"]], ["QG2", "QG4"])
+        self.assertEqual(
+            [(item["node_code"], item["old_version_no"], item["new_version_no"]) for item in data["version_changes"]],
+            [("QG2", "V01", "V02"), ("QG4", "V01", "V02")],
+        )
+        changes_by_node = {item["node_code"]: item["changes"] for item in data["nodes"]}
+        self.assertIn("modified", {change["change_type"] for change in changes_by_node["QG2"]})
+        self.assertIn("removed", {change["change_type"] for change in changes_by_node["QG2"]})
+        self.assertIn("added", {change["change_type"] for change in changes_by_node["QG4"]})
+        modified_change = next(change for change in changes_by_node["QG2"] if change["change_type"] == "modified")
+        self.assertIn("Checklist 要求", modified_change["change_summary"])
+        self.assertEqual(modified_change["change_details"][0]["field"], "checklist_requirement")
+
+    def test_publish_rule_release_batch_publishes_all_drafts_and_writes_audit_tables(self):
+        from app.core.database import query_all, query_one
+
+        nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes.status_code, 200, nodes.text)
+        qg2 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG2")
+        qg3 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG3")
+
+        qg2_draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg2_draft.status_code, 200, qg2_draft.text)
+        qg2_rule = qg2_draft.json()["data"]["business_check_rules"][0]
+        disabled = self.client.patch(
+            f"/api/v1/business-check-rules/{qg2_rule['id']}",
+            headers=self.headers,
+            json={"is_active": False},
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+
+        qg3_draft = self.client.post(f"/api/v1/qg-nodes/{qg3['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg3_draft.status_code, 200, qg3_draft.text)
+        qg3_rule = qg3_draft.json()["data"]["business_check_rules"][0]
+        edited = self.client.patch(
+            f"/api/v1/business-check-rules/{qg3_rule['id']}",
+            headers=self.headers,
+            json={"item_name": "QG3 release batch edited item"},
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+
+        published = self.client.post(
+            "/api/v1/business-rule-release-batches/publish",
+            headers=self.headers,
+            json={"change_summary": "Batch release for QG2 and QG3"},
+        )
+
+        self.assertEqual(published.status_code, 200, published.text)
+        data = published.json()["data"]
+        self.assertEqual(data["status"], "published")
+        self.assertEqual(data["change_summary"], "Batch release for QG2 and QG3")
+        self.assertEqual([item["node_code"] for item in data["items"]], ["QG2", "QG3"])
+        self.assertEqual(query_one("SELECT COUNT(*) AS total FROM business_rule_release_batches")["total"], 1)
+        self.assertEqual(query_one("SELECT COUNT(*) AS total FROM business_rule_release_batch_items")["total"], 2)
+        self.assertGreaterEqual(query_one("SELECT COUNT(*) AS total FROM business_rule_change_logs")["total"], 2)
+        qg2_change_types = {
+            row["change_type"]
+            for row in query_all(
+                "SELECT change_type FROM business_rule_change_logs WHERE qg_node_id = ?",
+                (qg2["id"],),
+            )
+        }
+        self.assertIn("disabled", qg2_change_types)
+        self.assertEqual(
+            query_all("SELECT DISTINCT status FROM business_rule_versions WHERE id IN (?, ?)", (qg2_draft.json()["data"]["id"], qg3_draft.json()["data"]["id"])),
+            [{"status": "published"}],
+        )
+        self.assertEqual(
+            query_one("SELECT COUNT(*) AS total FROM business_rule_versions WHERE status = 'draft'")["total"],
+            0,
+        )
+
+    def test_publish_rule_release_batch_rolls_back_when_late_step_fails(self):
+        from app.core.database import query_one
+
+        nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes.status_code, 200, nodes.text)
+        qg2 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG2")
+        qg4 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG4")
+
+        qg2_draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg2_draft.status_code, 200, qg2_draft.text)
+        qg4_draft = self.client.post(f"/api/v1/qg-nodes/{qg4['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg4_draft.status_code, 200, qg4_draft.text)
+
+        with patch("app.services.rule_service.audit", side_effect=RuntimeError("forced release audit failure")):
+            failed = self.client.post("/api/v1/business-rule-release-batches/publish", headers=self.headers, json={})
+
+        self.assertEqual(failed.status_code, 500)
+        self.assertEqual(query_one("SELECT COUNT(*) AS total FROM business_rule_release_batches")["total"], 0)
+        self.assertEqual(
+            query_one("SELECT COUNT(*) AS total FROM business_rule_versions WHERE id IN (?, ?) AND status = 'draft'", (qg2_draft.json()["data"]["id"], qg4_draft.json()["data"]["id"]))["total"],
+            2,
+        )
+
+    def test_publish_rule_release_batch_rejects_stale_draft_status(self):
+        from app.core.database import execute, query_one
+
+        nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes.status_code, 200, nodes.text)
+        qg2 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG2")
+        draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(draft.status_code, 200, draft.text)
+        draft_id = draft.json()["data"]["id"]
+        stale_preview = self.client.get("/api/v1/business-rule-release-draft", headers=self.headers)
+        self.assertEqual(stale_preview.status_code, 200, stale_preview.text)
+
+        execute("UPDATE business_rule_versions SET status = 'published' WHERE id = ?", (draft_id,))
+        with patch("app.services.rule_service.build_rule_release_draft", return_value=stale_preview.json()["data"]):
+            failed = self.client.post("/api/v1/business-rule-release-batches/publish", headers=self.headers, json={})
+
+        self.assertEqual(failed.status_code, 400)
+        self.assertEqual(failed.json()["error"]["code"], "RULE_VERSION_NOT_DRAFT")
+        self.assertEqual(query_one("SELECT COUNT(*) AS total FROM business_rule_release_batches")["total"], 0)
+
     def test_task_creation_rolls_back_when_later_step_fails(self):
         from app.core.database import query_all
 

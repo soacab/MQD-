@@ -3,15 +3,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   createBusinessRule,
+  getRuleReleaseDraft,
   getCurrentUser,
   getRuleVersion,
   listQGNodes,
   listRuleVersions,
   prepareEditableRuleVersion,
-  publishRuleVersion,
+  publishRuleReleaseBatch,
   updateBusinessRule,
   type BusinessRule,
   type QGNode,
+  type RuleReleaseDraft,
   type RuleVersion,
   type User
 } from "@/lib/api";
@@ -95,17 +97,23 @@ function ruleCategoryLabel(itemType?: string | null) {
 
 function changeTypeLabel(changeType: string) {
   if (changeType === "disabled") {
-    return "停用";
+    return "禁";
   }
   if (changeType === "added") {
-    return "新增";
+    return "增";
   }
-  return "变更";
+  if (changeType === "modified") {
+    return "改";
+  }
+  if (changeType === "removed") {
+    return "删";
+  }
+  return "变";
 }
 
 function formatRuleChangeLine(item: { item_name: string; item_type?: string | null; change_type: string; change_summary?: string | null }) {
   const summary = item.change_summary ? `（${item.change_summary}）` : "";
-  return `${changeTypeLabel(item.change_type)}${ruleCategoryLabel(item.item_type)}：${item.item_name}${summary}`;
+  return `${changeTypeLabel(item.change_type)} ${ruleCategoryLabel(item.item_type)}：${item.item_name}${summary}`;
 }
 
 function ruleFormFromRule(rule: BusinessRule) {
@@ -133,7 +141,7 @@ export default function RulesPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<number | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [publishTargetVersion, setPublishTargetVersion] = useState<RuleVersion | null>(null);
+  const [releaseDraft, setReleaseDraft] = useState<RuleReleaseDraft | null>(null);
   const [publishSummary, setPublishSummary] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
   const [message, setMessage] = useState("");
@@ -145,13 +153,6 @@ export default function RulesPage() {
   const manualRules = rules.filter((rule) => rule.item_type === "manual" || rule.item_type === "inherit");
   const visibleRules = activeTab === "auto" ? autoRules : manualRules;
   const draftVersion = versions.find((version) => version.status === "draft") || null;
-
-  const draftChangeDetails =
-    publishTargetVersion?.business_check_rules?.map((rule) => ({
-      item_name: rule.item_name,
-      item_type: rule.item_type,
-      change_type: asBoolean(rule.is_active) ? "added" : "disabled"
-    })) || [];
 
   const selectedVersionMeta = useMemo(() => {
     if (!selectedVersion) {
@@ -167,12 +168,12 @@ export default function RulesPage() {
     window.dispatchEvent(
       new CustomEvent("checkflow:rules-actions-state", {
         detail: {
-          canPublish: canManageRules && Boolean(draftVersion),
+          canPublish: canManageRules && (releaseDraft === null || Boolean(releaseDraft.has_draft)),
           isPublishing
         }
       })
     );
-  }, [canManageRules, draftVersion, isPublishing]);
+  }, [canManageRules, releaseDraft, isPublishing]);
 
   useEffect(() => {
     function openHistoryFromTopbar() {
@@ -189,7 +190,17 @@ export default function RulesPage() {
       window.removeEventListener("checkflow:rules-open-history", openHistoryFromTopbar);
       window.removeEventListener("checkflow:rules-open-publish", openPublishFromTopbar);
     };
-  }, [canManageRules, draftVersion, isPublishing, selectedVersion]);
+  }, [canManageRules, releaseDraft, isPublishing, selectedVersion]);
+
+  async function refreshRuleReleaseDraft(canReadDraft = canManageRules) {
+    if (!canReadDraft) {
+      setReleaseDraft(null);
+      return null;
+    }
+    const draft = await getRuleReleaseDraft();
+    setReleaseDraft(draft);
+    return draft;
+  }
 
   async function loadNode(qgNodeId: number, preferredVersionId?: number) {
     const versionRows = await listRuleVersions(qgNodeId);
@@ -221,6 +232,9 @@ export default function RulesPage() {
         setCurrentUser(me);
         setNodes(nodeRows.items);
         setNodeRuleCounts(nodePublishedRuleCounts(nodeRows.items));
+        if (me.permissions.includes("rules_admin")) {
+          await refreshRuleReleaseDraft(true);
+        }
         const firstNodeId = nodeRows.items[0]?.id ?? null;
         setSelectedNodeId(firstNodeId);
         if (firstNodeId) {
@@ -255,24 +269,25 @@ export default function RulesPage() {
     setSelectedVersion(draft);
     const versionRows = await listRuleVersions(selectedNodeId);
     setVersions(versionRows.items);
+    await refreshRuleReleaseDraft(true);
     const copiedRule = rule ? draft.business_check_rules?.find((item) => item.rule_code === rule.rule_code) : undefined;
     setMessage("已准备可编辑规则版本，保存后发布规则版本才会影响新建任务。");
     return { version: draft, rule: copiedRule };
   }
 
   async function openPublishModal() {
-    if (!canManageRules || !draftVersion || isPublishing) {
+    if (!canManageRules || isPublishing) {
       return;
     }
     try {
-      const target =
-        selectedVersion?.status === "draft" && selectedVersion.id === draftVersion.id
-          ? selectedVersion
-          : await getRuleVersion(draftVersion.id);
-      setPublishTargetVersion(target);
+      const draft = await refreshRuleReleaseDraft(true);
+      if (!draft?.has_draft) {
+        setMessage("当前没有未发布规则变更。");
+        return;
+      }
       setPublishOpen(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "草稿版本加载失败");
+      setMessage(error instanceof Error ? error.message : "发布批次草稿加载失败");
     }
   }
 
@@ -343,6 +358,7 @@ export default function RulesPage() {
       setEditingRuleId(null);
       setMessage(editingRuleId ? "检查项已更新，发布规则版本后生效。" : "人工检查项已新增，发布规则版本后生效。");
       await loadNode(selectedVersion.qg_node_id, selectedVersion.id);
+      await refreshRuleReleaseDraft(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存检查项失败");
     }
@@ -363,6 +379,7 @@ export default function RulesPage() {
       await updateBusinessRule(targetRule.id, { is_active: false });
       setMessage("停用人工检查项已保存到未发布规则变更。");
       await loadNode(editable.version.qg_node_id, editable.version.id);
+      await refreshRuleReleaseDraft(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "停用人工检查项失败");
     }
@@ -372,7 +389,7 @@ export default function RulesPage() {
     if (isPublishing) {
       return;
     }
-    if (!publishTargetVersion) {
+    if (!releaseDraft?.has_draft) {
       setMessage("当前没有未发布规则变更。");
       setPublishOpen(false);
       return;
@@ -380,19 +397,22 @@ export default function RulesPage() {
     try {
       setIsPublishing(true);
       const trimmedSummary = publishSummary.trim();
-      const version = await publishRuleVersion(
-        publishTargetVersion.id,
-        trimmedSummary ? { change_summary: trimmedSummary } : {}
-      );
+      const batch = await publishRuleReleaseBatch(trimmedSummary ? { change_summary: trimmedSummary } : {});
       setPublishOpen(false);
-      setPublishTargetVersion(null);
       setPublishSummary("");
+      setReleaseDraft({ has_draft: false, nodes: [], version_changes: [], changes: [] });
       try {
-        await loadNode(version.qg_node_id, version.id);
-        setMessage("规则版本已发布，新建任务将使用新版本。");
+        const nodeRows = await listQGNodes();
+        setNodes(nodeRows.items);
+        setNodeRuleCounts(nodePublishedRuleCounts(nodeRows.items));
+        if (selectedNodeId) {
+          const selectedBatchItem = batch.items.find((item) => item.qg_node_id === selectedNodeId);
+          await loadNode(selectedNodeId, selectedBatchItem?.new_version_id);
+        }
+        await refreshRuleReleaseDraft(true);
+        setMessage("规则版本发布批次已发布，新建任务将使用涉及节点的新版本规则。");
       } catch (refreshError) {
-        setSelectedVersion(version);
-        setMessage(refreshError instanceof Error ? `规则版本已发布，但刷新失败：${refreshError.message}` : "规则版本已发布，但刷新失败");
+        setMessage(refreshError instanceof Error ? `规则版本发布批次已发布，但刷新失败：${refreshError.message}` : "规则版本发布批次已发布，但刷新失败");
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "发布失败");
@@ -584,14 +604,35 @@ export default function RulesPage() {
           <section className="rules-modal">
             <header>
               <h2>发布规则版本</h2>
-              <button type="button" onClick={() => { setPublishOpen(false); setPublishTargetVersion(null); }}>×</button>
+              <button type="button" onClick={() => setPublishOpen(false)}>×</button>
             </header>
-            <p>发布后新建任务将使用 {selectedNode?.node_code} {publishTargetVersion?.version_no}，进行中任务不受影响。</p>
-            <ul className="plain-list">
-              {draftChangeDetails.map((item, index) => (
-                <li key={`${item.item_name}-${item.change_type}-${index}`}>{formatRuleChangeLine(item)}</li>
+            <p>发布后新建任务将使用涉及节点的新版本规则，进行中任务不受影响。</p>
+            <section className="rules-publish-summary">
+              <h3>涉及节点版本变更</h3>
+              <ul className="plain-list">
+                {(releaseDraft?.version_changes || []).map((item) => (
+                  <li key={`${item.qg_node_id}-${item.new_version_id}`}>
+                    节 {item.node_code}：{item.old_version_no || "-"} → {item.new_version_no}
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <section className="rules-publish-summary">
+              <h3>本次草稿变更内容</h3>
+              {(releaseDraft?.nodes || []).map((node) => (
+                <div key={`${node.qg_node_id}-${node.new_version_id}`} className="rules-publish-node">
+                  <strong>{node.node_code}</strong>
+                  <ul className="plain-list">
+                    {node.changes.map((item, index) => (
+                      <li key={`${node.qg_node_id}-${item.rule_code}-${item.change_type}-${index}`}>
+                        {formatRuleChangeLine(item)}
+                      </li>
+                    ))}
+                    {!node.changes.length ? <li>无字段变化，仅发布版本状态。</li> : null}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </section>
             <label>
               本次总体规则版本变更说明
               <textarea value={publishSummary} onChange={(event) => setPublishSummary(event.target.value)} placeholder="选填，填写后将记入版本历史" />
@@ -600,7 +641,7 @@ export default function RulesPage() {
               <button type="button" disabled={isPublishing} onClick={() => void confirmPublish()}>
                 {isPublishing ? "发布中..." : "确认发布规则版本"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => { setPublishOpen(false); setPublishTargetVersion(null); }}>取消</button>
+              <button type="button" className="secondary-button" onClick={() => setPublishOpen(false)}>取消</button>
             </footer>
           </section>
         </div>

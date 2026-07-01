@@ -14,6 +14,16 @@ def list_rule_versions(qg_node_id: int | None = None, status: str | None = None,
     return ok(rule_service.list_rule_versions(qg_node_id, status, user))
 
 
+@router.get("/api/v1/business-rule-release-draft")
+def get_rule_release_draft(user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(rule_service.get_rule_release_draft(user))
+
+
+@router.post("/api/v1/business-rule-release-batches/publish")
+def publish_rule_release_batch(payload: dict | None = Body(default=None), user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(rule_service.publish_rule_release_batch(payload, user))
+
+
 @router.post("/api/v1/business-rule-versions")
 def create_rule_version(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
     return ok(rule_service.create_rule_version(payload, user))

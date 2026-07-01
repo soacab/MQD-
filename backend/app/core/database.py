@@ -24,6 +24,7 @@ class CursorResult:
     def __init__(self, cursor: Any, lastrowid: int | None = None):
         self._cursor = cursor
         self.lastrowid = lastrowid if lastrowid is not None else getattr(cursor, "lastrowid", None)
+        self.rowcount = getattr(cursor, "rowcount", -1)
 
 
 def is_postgres_url(database_url: str) -> bool:
@@ -257,6 +258,42 @@ CREATE TABLE IF NOT EXISTS business_rule_versions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(qg_node_id, version_no)
+);
+
+CREATE TABLE IF NOT EXISTS business_rule_release_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_no TEXT NOT NULL UNIQUE,
+    change_summary TEXT,
+    published_by INTEGER REFERENCES users(id),
+    published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS business_rule_release_batch_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    release_batch_id INTEGER NOT NULL REFERENCES business_rule_release_batches(id),
+    qg_node_id INTEGER NOT NULL REFERENCES qg_nodes(id),
+    old_version_id INTEGER REFERENCES business_rule_versions(id),
+    new_version_id INTEGER NOT NULL REFERENCES business_rule_versions(id),
+    old_version_no TEXT,
+    new_version_no TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(release_batch_id, qg_node_id),
+    UNIQUE(new_version_id)
+);
+
+CREATE TABLE IF NOT EXISTS business_rule_change_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    release_batch_id INTEGER NOT NULL REFERENCES business_rule_release_batches(id),
+    qg_node_id INTEGER NOT NULL REFERENCES qg_nodes(id),
+    business_rule_version_id INTEGER NOT NULL REFERENCES business_rule_versions(id),
+    rule_code TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    item_type TEXT,
+    change_type TEXT NOT NULL,
+    change_summary TEXT,
+    change_detail_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS business_check_rules (

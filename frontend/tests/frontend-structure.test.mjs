@@ -39,6 +39,8 @@ describe("frontend structure", () => {
       "/api/v1/qg-nodes",
       "/api/v1/qg-nodes/",
       "/api/v1/business-rule-versions",
+      "/api/v1/business-rule-release-draft",
+      "/api/v1/business-rule-release-batches/publish",
       "/api/v1/inspection-tasks/prepare",
       "/api/v1/inspection-tasks",
       "/api/v1/rectification-items",
@@ -106,7 +108,7 @@ describe("frontend structure", () => {
         "type=\"checkbox\""
       ],
       "app/projects/page.tsx": ["use client", "listProjects(", "updateProject(", "updateProjectVdrive(", "addProjectOrder(", "deleteProject("],
-      "app/rules/page.tsx": ["use client", "listQGNodes(", "prepareEditableRuleVersion(", "publishRuleVersion("],
+      "app/rules/page.tsx": ["use client", "listQGNodes(", "prepareEditableRuleVersion(", "publishRuleReleaseBatch("],
       "app/inspection/page.tsx": ["use client", "confirmInspectionItem(", "archiveCurrentRound("],
       "app/reports/page.tsx": ["use client", "listArchiveProjects(", "listBusinessUserOptions(", "getProject(", "addProjectOrder("],
       "app/rectification/page.tsx": ["use client", "listRectifications(", "triggerRecheck("]
@@ -259,7 +261,11 @@ describe("frontend structure", () => {
       "published_by_name",
       "is_current",
       "change_details",
-      "draftChangeDetails",
+      "releaseDraft",
+      "getRuleReleaseDraft(",
+      "publishRuleReleaseBatch(",
+      "涉及节点版本变更",
+      "本次草稿变更内容",
       "确认发布规则版本",
       "当前版本",
       "新增人工检查项",
@@ -567,10 +573,11 @@ describe("frontend structure", () => {
     assert.match(rulesPage, /checkflow:rules-open-publish/, "rules page should respond to topbar publish action");
     assert.doesNotMatch(rulesPage, /rules-header-actions/, "rules page should not keep duplicate page-header rule actions");
     assert.doesNotMatch(rulesPage, /继续编辑草稿|continueDraftVersion/, "rules page should not expose a separate continue-draft action");
-    assert.match(rulesPage, /const \[publishTargetVersion/, "rules page should keep publish target separate from the displayed version");
-    assert.match(rulesPage, /canPublish: canManageRules && Boolean\(draftVersion\)/, "rules publish action should be enabled when a draft exists");
-    assert.match(rulesPage, /getRuleVersion\(draftVersion\.id\)/, "rules publish action should load draft details without switching the table");
-    assert.match(rulesPage, /publishRuleVersion\(\s*publishTargetVersion\.id/, "rules publish action should publish the selected draft target");
+    assert.doesNotMatch(rulesPage, /publishTargetVersion|draftChangeDetails/, "rules page should not publish only the selected node draft");
+    assert.match(rulesPage, /canPublish: canManageRules && \(releaseDraft === null \|\| Boolean\(releaseDraft\.has_draft\)\)/, "rules publish action should be enabled from the global draft preview");
+    assert.match(rulesPage, /getRuleReleaseDraft\(\)/, "rules publish action should load the global draft preview");
+    assert.match(rulesPage, /publishRuleReleaseBatch\(/, "rules publish action should publish the release batch");
+    assert.doesNotMatch(rulesPage, /publishRuleVersion\(\s*publishTargetVersion\.id/, "rules page should not call the single-version publish endpoint");
 
     for (const snippet of [
       "--cf-bg-base",

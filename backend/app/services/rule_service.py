@@ -8,6 +8,29 @@ from app.repositories.common import audit, row_or_404
 from app.services.permission_service import require_permissions, require_rule_read_permissions
 
 
+RULE_CHANGE_FIELDS = (
+    "item_name",
+    "item_type",
+    "check_type",
+    "checklist_requirement",
+    "owner_dept",
+    "is_apqp",
+    "is_active",
+    "sort_order",
+)
+
+RULE_CHANGE_FIELD_LABELS = {
+    "item_name": "检查项名称",
+    "item_type": "检查项类型",
+    "check_type": "检查方式",
+    "checklist_requirement": "Checklist 要求",
+    "owner_dept": "责任方",
+    "is_apqp": "APQP",
+    "is_active": "启用状态",
+    "sort_order": "排序",
+}
+
+
 def serialize_rule_version(version: dict[str, Any]) -> dict[str, Any]:
     publisher = query_one("SELECT name FROM users WHERE id = ?", (version.get("published_by"),))
     current = query_one(
@@ -30,7 +53,35 @@ def serialize_rule_version(version: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def logged_rule_change_details(version_id: int) -> list[dict[str, Any]]:
+    rows = query_all(
+        """
+        SELECT rule_code, item_name, item_type, change_type, change_summary, change_detail_json
+        FROM business_rule_change_logs
+        WHERE business_rule_version_id = ?
+        ORDER BY id
+        """,
+        (version_id,),
+    )
+    for row in rows:
+        row["change_details"] = from_json(row.pop("change_detail_json"), [])
+    return rows
+
+
+def was_published_in_release_batch(version_id: int) -> bool:
+    row = query_one(
+        "SELECT id FROM business_rule_release_batch_items WHERE new_version_id = ? LIMIT 1",
+        (version_id,),
+    )
+    return bool(row)
+
+
 def rule_version_change_details(version_id: int) -> list[dict[str, Any]]:
+    logged = logged_rule_change_details(version_id)
+    if logged:
+        return logged
+    if was_published_in_release_batch(version_id):
+        return []
     rules = query_all("SELECT * FROM business_check_rules WHERE business_rule_version_id = ? ORDER BY sort_order, id", (version_id,))
     details = []
     for rule in rules:
@@ -185,6 +236,294 @@ def prepare_editable_rule_version(qg_node_id: int, user: dict[str, Any]) -> dict
                 {"qg_node_id": qg_node_id, "source_version_id": source["id"] if source else None},
             )
     return rule_version_detail(draft_id)
+
+
+def current_published_rule_version(qg_node_id: int) -> dict[str, Any] | None:
+    return query_one(
+        """
+        SELECT * FROM business_rule_versions
+        WHERE qg_node_id = ? AND status = ?
+        ORDER BY published_at DESC, id DESC LIMIT 1
+        """,
+        (qg_node_id, RuleVersionStatus.PUBLISHED),
+    )
+
+
+def draft_rule_versions() -> list[dict[str, Any]]:
+    return query_all(
+        """
+        SELECT v.*, q.node_code
+        FROM business_rule_versions v
+        JOIN qg_nodes q ON q.id = v.qg_node_id
+        WHERE v.status = ?
+        ORDER BY q.sort_order, v.id
+        """,
+        (RuleVersionStatus.DRAFT,),
+    )
+
+
+def rules_by_code(version_id: int | None) -> dict[str, dict[str, Any]]:
+    if not version_id:
+        return {}
+    rows = query_all("SELECT * FROM business_check_rules WHERE business_rule_version_id = ? ORDER BY sort_order, id", (version_id,))
+    return {row["rule_code"]: row for row in rows}
+
+
+def normalized_rule_value(value: Any) -> Any:
+    return None if value == "" else value
+
+
+def rule_field_diffs(old_rule: dict[str, Any], draft_rule: dict[str, Any]) -> list[dict[str, Any]]:
+    diffs = []
+    for field in RULE_CHANGE_FIELDS:
+        old_value = normalized_rule_value(old_rule.get(field))
+        new_value = normalized_rule_value(draft_rule.get(field))
+        if old_value == new_value:
+            continue
+        diffs.append(
+            {
+                "field": field,
+                "label": RULE_CHANGE_FIELD_LABELS[field],
+                "old_value": old_value,
+                "new_value": new_value,
+            }
+        )
+    return diffs
+
+
+def change_summary_for(
+    change_type: str,
+    old_rule: dict[str, Any] | None,
+    draft_rule: dict[str, Any] | None,
+    change_details: list[dict[str, Any]] | None = None,
+) -> str:
+    rule = draft_rule or old_rule or {}
+    name = rule.get("item_name") or rule.get("rule_code") or "检查项"
+    if change_type == "added":
+        return f"新增「{name}」"
+    if change_type == "modified":
+        changed_labels = "、".join(detail["label"] for detail in change_details or [])
+        return f"{changed_labels or '规则内容'}更新"
+    if change_type == "disabled":
+        return f"停用「{name}」"
+    if change_type == "removed":
+        return f"删除「{name}」"
+    return f"变更「{name}」"
+
+
+def rule_changes_between_versions(
+    qg_node_id: int,
+    node_code: str,
+    old_version: dict[str, Any] | None,
+    draft_version: dict[str, Any],
+) -> list[dict[str, Any]]:
+    old_rules = rules_by_code(old_version["id"] if old_version else None)
+    draft_rules = rules_by_code(draft_version["id"])
+    changes: list[dict[str, Any]] = []
+    for rule_code, draft_rule in draft_rules.items():
+        old_rule = old_rules.get(rule_code)
+        change_details: list[dict[str, Any]] = []
+        if not old_rule:
+            change_type = "added"
+        elif old_rule.get("is_active") and not draft_rule.get("is_active"):
+            change_type = "disabled"
+            change_details = rule_field_diffs(old_rule, draft_rule)
+        else:
+            change_details = rule_field_diffs(old_rule, draft_rule)
+            if not change_details:
+                continue
+            change_type = "modified"
+        changes.append(
+            {
+                "qg_node_id": qg_node_id,
+                "node_code": node_code,
+                "business_rule_version_id": draft_version["id"],
+                "rule_code": rule_code,
+                "item_name": draft_rule["item_name"],
+                "item_type": draft_rule.get("item_type"),
+                "change_type": change_type,
+                "change_summary": change_summary_for(change_type, old_rule, draft_rule, change_details),
+                "change_details": change_details,
+            }
+        )
+    for rule_code, old_rule in old_rules.items():
+        if rule_code in draft_rules:
+            continue
+        changes.append(
+            {
+                "qg_node_id": qg_node_id,
+                "node_code": node_code,
+                "business_rule_version_id": draft_version["id"],
+                "rule_code": rule_code,
+                "item_name": old_rule["item_name"],
+                "item_type": old_rule.get("item_type"),
+                "change_type": "removed",
+                "change_summary": change_summary_for("removed", old_rule, None),
+                "change_details": [],
+            }
+        )
+    return changes
+
+
+def build_rule_release_draft() -> dict[str, Any]:
+    nodes = []
+    version_changes = []
+    flat_changes = []
+    for draft in draft_rule_versions():
+        old_version = current_published_rule_version(draft["qg_node_id"])
+        old_version_no = old_version["version_no"] if old_version else None
+        changes = rule_changes_between_versions(draft["qg_node_id"], draft["node_code"], old_version, draft)
+        node_preview = {
+            "qg_node_id": draft["qg_node_id"],
+            "node_code": draft["node_code"],
+            "old_version_id": old_version["id"] if old_version else None,
+            "old_version_no": old_version_no,
+            "new_version_id": draft["id"],
+            "new_version_no": draft["version_no"],
+            "changes": changes,
+        }
+        nodes.append(node_preview)
+        version_changes.append(
+            {
+                "qg_node_id": draft["qg_node_id"],
+                "node_code": draft["node_code"],
+                "old_version_id": old_version["id"] if old_version else None,
+                "old_version_no": old_version_no,
+                "new_version_id": draft["id"],
+                "new_version_no": draft["version_no"],
+            }
+        )
+        flat_changes.extend(changes)
+    return {
+        "has_draft": bool(nodes),
+        "nodes": nodes,
+        "version_changes": version_changes,
+        "changes": flat_changes,
+    }
+
+
+def get_rule_release_draft(user: dict[str, Any]) -> dict[str, Any]:
+    require_rule_read_permissions(user)
+    return build_rule_release_draft()
+
+
+def next_release_batch_no() -> str:
+    row = query_one("SELECT COUNT(*) AS total FROM business_rule_release_batches")
+    return f"RB{(row['total'] if row else 0) + 1:04d}"
+
+
+def publish_rule_release_batch(payload: dict | None, user: dict[str, Any]) -> dict[str, Any]:
+    require_permissions(user, {Permission.RULES_ADMIN})
+    change_summary = (payload or {}).get("change_summary")
+    with transaction():
+        preview = build_rule_release_draft()
+        if not preview["nodes"]:
+            raise BusinessError("NO_RULE_RELEASE_DRAFT", "当前没有未发布规则变更")
+        batch_cur = execute(
+            """
+            INSERT INTO business_rule_release_batches(batch_no, change_summary, published_by)
+            VALUES (?, ?, ?)
+            """,
+            (next_release_batch_no(), change_summary, user["id"]),
+        )
+        batch_id = batch_cur.lastrowid
+        for node in preview["nodes"]:
+            execute(
+                """
+                INSERT INTO business_rule_release_batch_items(
+                    release_batch_id, qg_node_id, old_version_id, new_version_id,
+                    old_version_no, new_version_no
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    batch_id,
+                    node["qg_node_id"],
+                    node["old_version_id"],
+                    node["new_version_id"],
+                    node["old_version_no"],
+                    node["new_version_no"],
+                ),
+            )
+            execute(
+                "UPDATE business_rule_versions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE qg_node_id = ? AND status = ?",
+                (RuleVersionStatus.DEPRECATED, node["qg_node_id"], RuleVersionStatus.PUBLISHED),
+            )
+            if change_summary:
+                execute(
+                    "UPDATE business_rule_versions SET change_summary = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (change_summary, node["new_version_id"]),
+                )
+            status_update = execute(
+                """
+                UPDATE business_rule_versions
+                SET status = ?, published_by = ?, published_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = ?
+                """,
+                (RuleVersionStatus.PUBLISHED, user["id"], node["new_version_id"], RuleVersionStatus.DRAFT),
+            )
+            if status_update.rowcount != 1:
+                raise BusinessError("RULE_VERSION_NOT_DRAFT", "只有草稿版本可发布")
+            for change in node["changes"]:
+                execute(
+                    """
+                    INSERT INTO business_rule_change_logs(
+                        release_batch_id, qg_node_id, business_rule_version_id, rule_code,
+                        item_name, item_type, change_type, change_summary, change_detail_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        batch_id,
+                        change["qg_node_id"],
+                        change["business_rule_version_id"],
+                        change["rule_code"],
+                        change["item_name"],
+                        change.get("item_type"),
+                        change["change_type"],
+                        change.get("change_summary"),
+                        to_json(change.get("change_details", [])),
+                    ),
+                )
+        audit("publish_rule_release_batch", "business_rule_release_batch", batch_id, user["id"], payload or {})
+    return get_rule_release_batch(batch_id)
+
+
+def get_rule_release_batch(batch_id: int) -> dict[str, Any]:
+    batch = row_or_404(
+        "SELECT * FROM business_rule_release_batches WHERE id = ?",
+        (batch_id,),
+        "RULE_RELEASE_BATCH_NOT_FOUND",
+        "规则发布批次不存在",
+    )
+    items = query_all(
+        """
+        SELECT i.*, q.node_code
+        FROM business_rule_release_batch_items i
+        JOIN qg_nodes q ON q.id = i.qg_node_id
+        WHERE i.release_batch_id = ?
+        ORDER BY q.sort_order, i.id
+        """,
+        (batch_id,),
+    )
+    changes = query_all(
+        """
+        SELECT c.*, q.node_code
+        FROM business_rule_change_logs c
+        JOIN qg_nodes q ON q.id = c.qg_node_id
+        WHERE c.release_batch_id = ?
+        ORDER BY q.sort_order, c.id
+        """,
+        (batch_id,),
+    )
+    for change in changes:
+        change["change_details"] = from_json(change.pop("change_detail_json"), [])
+    for item in items:
+        item["changes"] = [change for change in changes if change["qg_node_id"] == item["qg_node_id"]]
+    return {
+        **batch,
+        "status": "published",
+        "items": items,
+        "changes": changes,
+    }
 
 
 def next_business_rule_code(version_id: int) -> str:
