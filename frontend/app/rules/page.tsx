@@ -328,7 +328,7 @@ export default function RulesPage() {
       <header className="rules-page-header">
         <div>
           <p className="eyebrow">规则配置</p>
-          <h1>{selectedNode?.node_name || "QG"} - 检查规则</h1>
+          <h1>{selectedNode?.node_code || "QG"} - 检查规则</h1>
           <p>{selectedVersionMeta}</p>
         </div>
         <div className="rules-header-actions">
@@ -357,7 +357,7 @@ export default function RulesPage() {
               className={node.id === selectedNodeId ? "active" : ""}
               onClick={() => void handleSelectNode(node.id)}
             >
-              <span>{node.node_name}</span>
+              <span>{node.node_code}</span>
               <strong>{node.id === selectedNodeId ? rules.length : "-"}</strong>
             </button>
           ))}
@@ -367,7 +367,7 @@ export default function RulesPage() {
           <div className="rules-content-head">
             <div>
               <div className="rules-title-row">
-                <h2>{selectedNode?.node_name || "QG"} - 检查规则</h2>
+                <h2>{selectedNode?.node_code || "QG"} - 检查规则</h2>
                 {selectedVersion ? <span>{selectedVersion.version_no}</span> : null}
               </div>
               <p>{selectedVersionMeta}</p>
@@ -437,7 +437,7 @@ export default function RulesPage() {
         <div className="rules-drawer-backdrop" onClick={() => setHistoryOpen(false)}>
           <aside className="rules-history-drawer" onClick={(event) => event.stopPropagation()}>
             <header>
-              <h2>版本历史 - {selectedNode?.node_name || "QG"}</h2>
+              <h2>版本历史 - {selectedNode?.node_code || "QG"}</h2>
               <button type="button" onClick={() => setHistoryOpen(false)}>×</button>
             </header>
             <div className="rules-history-list">
@@ -539,7 +539,7 @@ export default function RulesPage() {
               <h2>发布规则版本</h2>
               <button type="button" onClick={() => setPublishOpen(false)}>×</button>
             </header>
-            <p>发布后新建任务将使用 {selectedNode?.node_name} {selectedVersion?.version_no}，进行中任务不受影响。</p>
+            <p>发布后新建任务将使用 {selectedNode?.node_code} {selectedVersion?.version_no}，进行中任务不受影响。</p>
             <ul className="plain-list">
               {draftChangeDetails.map((item) => (
                 <li key={item.rule_code}>{item.rule_code}：{item.item_name}（{item.change_type}）</li>

@@ -186,13 +186,13 @@ def find_project_by_vdrive(vdrive: dict[str, Any]) -> dict[str, Any] | None:
     )
 
 
-def first_active_qg_node() -> dict[str, Any] | None:
-    return query_one("SELECT * FROM qg_nodes WHERE is_active = 1 ORDER BY sort_order LIMIT 1")
+def first_qg_node() -> dict[str, Any] | None:
+    return query_one("SELECT * FROM qg_nodes ORDER BY sort_order LIMIT 1")
 
 
 def recommended_qg_node_for_project(project_id: int | None) -> dict[str, Any] | None:
     if project_id is None:
-        return first_active_qg_node()
+        return first_qg_node()
     latest_task = query_one(
         """
         SELECT q.sort_order FROM inspection_tasks t
@@ -203,17 +203,17 @@ def recommended_qg_node_for_project(project_id: int | None) -> dict[str, Any] | 
         (project_id, InspectionTaskStatus.VOIDED),
     )
     if not latest_task:
-        return first_active_qg_node()
+        return first_qg_node()
     return (
         query_one(
             """
             SELECT * FROM qg_nodes
-            WHERE is_active = 1 AND sort_order > ?
+            WHERE sort_order > ?
             ORDER BY sort_order LIMIT 1
             """,
             (latest_task["sort_order"],),
         )
-        or first_active_qg_node()
+        or first_qg_node()
     )
 
 
@@ -351,4 +351,4 @@ def delete_project(project_id: int, payload: dict[str, Any], user: dict[str, Any
 
 def list_qg_nodes(user: dict[str, Any]) -> dict[str, Any]:
     require_rule_read_permissions(user)
-    return {"items": query_all("SELECT * FROM qg_nodes WHERE is_active = 1 ORDER BY sort_order")}
+    return {"items": query_all("SELECT * FROM qg_nodes ORDER BY sort_order")}

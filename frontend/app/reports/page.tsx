@@ -525,7 +525,7 @@ export default function ReportsPage() {
             <div className="archive-modal-body">
               <div className="stack">
                 <p>项目：{selectedReport.project?.project_name || selectedReport.project_id}</p>
-                <p>QG 节点：{selectedReport.qg_node?.node_name || selectedReport.qg_node_id}</p>
+                <p>QG 节点：{selectedReport.qg_node?.node_code || selectedReport.qg_node_id}</p>
                 <p>综合结论：{resultLabels[selectedReport.overall_result || ""] || selectedReport.overall_result || "-"}</p>
                 <p>规则版本：{selectedReport.business_rule_version_no}</p>
                 <p>检查项：{selectedReport.items?.length || 0} 项</p>

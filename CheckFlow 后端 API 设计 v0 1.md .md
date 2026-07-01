@@ -667,9 +667,7 @@ GET /api/v1/qg-nodes
     {
       "id": "qg_001",
       "node_code": "QG3.3",
-      "node_name": "QG3.3",
-      "sort_order": 5,
-      "is_active": true
+      "sort_order": 5
     }
   ]
 }

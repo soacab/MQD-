@@ -152,7 +152,7 @@ def get_rule_version(version_id: int, user: dict[str, Any]) -> dict[str, Any]:
 
 def prepare_editable_rule_version(qg_node_id: int, user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.RULES_ADMIN})
-    row_or_404("SELECT * FROM qg_nodes WHERE id = ? AND is_active = 1", (qg_node_id,), "QG_NODE_NOT_FOUND", "QG 节点不存在")
+    row_or_404("SELECT * FROM qg_nodes WHERE id = ?", (qg_node_id,), "QG_NODE_NOT_FOUND", "QG 节点不存在")
     with transaction():
         draft = query_one(
             "SELECT * FROM business_rule_versions WHERE qg_node_id = ? AND status = ? ORDER BY id DESC LIMIT 1",

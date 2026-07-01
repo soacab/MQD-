@@ -52,7 +52,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_code TEXT,
     project_name TEXT NOT NULL,
     customer TEXT NOT NULL,
     project_category TEXT,
@@ -97,9 +96,7 @@ CREATE TABLE IF NOT EXISTS project_models (
 CREATE TABLE IF NOT EXISTS qg_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     node_code TEXT NOT NULL UNIQUE,
-    node_name TEXT NOT NULL,
     sort_order INTEGER NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

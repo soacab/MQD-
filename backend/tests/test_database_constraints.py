@@ -23,6 +23,16 @@ class DatabaseConstraintTest(unittest.TestCase):
 
         close_database()
 
+    def test_project_and_qg_schema_excludes_removed_business_fields(self):
+        from app.core.database import query_all
+
+        project_columns = {row["name"] for row in query_all("PRAGMA table_info(projects)")}
+        qg_columns = {row["name"] for row in query_all("PRAGMA table_info(qg_nodes)")}
+
+        self.assertNotIn("project_code", project_columns)
+        self.assertNotIn("node_name", qg_columns)
+        self.assertNotIn("is_active", qg_columns)
+
     def test_user_permission_and_qg_unique_constraints(self):
         from app.core.database import execute
 
@@ -36,7 +46,7 @@ class DatabaseConstraintTest(unittest.TestCase):
             execute("INSERT INTO user_permissions(user_id, permission_code) VALUES (?, ?)", (1, "super_admin"))
 
         with self.assertRaises(sqlite3.IntegrityError):
-            execute("INSERT INTO qg_nodes(node_code, node_name, sort_order, is_active) VALUES (?, ?, ?, 1)", ("QG4", "Duplicate QG4", 99))
+            execute("INSERT INTO qg_nodes(node_code, sort_order) VALUES (?, ?)", ("QG4", 99))
 
     def test_rule_unique_constraints(self):
         from app.core.database import execute

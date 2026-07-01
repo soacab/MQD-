@@ -18,8 +18,8 @@ def seed_database() -> None:
     for sort_order, code in enumerate(("QG2", "QG3.1", "QG3.2", "QG3.3", "QG3", "QG4"), start=1):
         if not query_one("SELECT id FROM qg_nodes WHERE node_code = ?", (code,)):
             execute(
-                "INSERT INTO qg_nodes(node_code, node_name, sort_order, is_active) VALUES (?, ?, ?, 1)",
-                (code, code, sort_order),
+                "INSERT INTO qg_nodes(node_code, sort_order) VALUES (?, ?)",
+                (code, sort_order),
             )
 
     if not query_one("SELECT key FROM system_settings WHERE key = ?", (SystemSettingKey.AUTO_CHECK_ENABLED,)):

@@ -172,7 +172,6 @@ report_items.id
 | 字段 | 类型建议 | 含义 |
 | --- | --- | --- |
 | id | bigint / uuid | 项目ID |
-| project_code | varchar | 项目编号，可选 |
 | project_name | varchar | 项目名称 |
 | customer | varchar | 客户名称 |
 | project_category | varchar | 项目类别，如新项目、改款、平台延伸 |
@@ -275,11 +274,9 @@ PIL、UCM 等系统直连检查通常需要按机型执行。
 
 | 字段 | 类型建议 | 含义 |
 | --- | --- | --- |
-| id | bigint / uuid | QG节点ID |
+| id | bigint / uuid | QG节点内部ID，用于外键关联，不对业务用户展示 |
 | node_code | varchar | 节点编码，如 QG2、QG3.1、QG3.2、QG3.3、QG3、QG4 |
-| node_name | varchar | 节点名称 |
-| sort_order | int | 排序 |
-| is_active | boolean | 是否启用 |
+| sort_order | int | QG节点流程排序，用于推荐下一个节点 |
 | created_at | timestamp | 创建时间 |
 | updated_at | timestamp | 更新时间 |
 

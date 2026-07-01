@@ -122,7 +122,6 @@ export type InspectionTaskPrepare = {
 export type QGNode = {
   id: number;
   node_code: string;
-  node_name: string;
   sort_order: number;
 };
 
