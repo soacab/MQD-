@@ -20,6 +20,7 @@ export default function LoginPage() {
       saveSession(result);
       setMessage("登录成功。");
       await getCurrentUser();
+      window.location.href = "/";
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "登录失败");
     } finally {

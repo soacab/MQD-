@@ -132,6 +132,7 @@ describe("frontend structure", () => {
 
     const loginPage = readFileSync(resolve(root, "app/login/page.tsx"), "utf8");
     assert.doesNotMatch(loginPage, /field-governance-note/, "login page should not show internal field governance copy");
+    assert.match(loginPage, /window\.location\.href = "\/"/, "login page should redirect to workbench after login");
     for (const snippet of ["login-session", "当前会话", "进入工作台", "退出登录"]) {
       assert.doesNotMatch(loginPage, new RegExp(snippet), `login page should not expose ${snippet}`);
     }
