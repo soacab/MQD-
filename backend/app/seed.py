@@ -225,13 +225,12 @@ def insert_prototype_business_rule(
     result = execute(
         """
         INSERT INTO business_check_rules(
-            business_rule_version_id, qg_node_id, rule_code, item_name, item_type,
+            business_rule_version_id, rule_code, item_name, item_type,
             check_type, checklist_requirement, owner_dept, is_apqp, is_active, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
         """,
         (
             version_id,
-            qg_node_id,
             rule_code,
             item_name,
             item_type,
@@ -248,17 +247,15 @@ def insert_prototype_execution_rule(rule_id: int, rule_code: str, check_type: st
     execute(
         """
         INSERT INTO auto_check_execution_rules(
-            business_check_rule_id, execution_code, execution_mode, adapter_type,
-            config_json, config_version, is_enabled, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+            business_check_rule_id, execution_mode, adapter_type,
+            config_json, is_enabled, created_by
+        ) VALUES (?, ?, ?, ?, 1, ?)
         """,
         (
             rule_id,
-            f"{rule_code}:EXEC",
             check_type,
             "mock_system" if check_type == "system_direct" else "vdrive",
             to_json(config),
-            "V1",
             1,
         ),
     )

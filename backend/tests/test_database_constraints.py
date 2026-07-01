@@ -28,10 +28,21 @@ class DatabaseConstraintTest(unittest.TestCase):
 
         project_columns = {row["name"] for row in query_all("PRAGMA table_info(projects)")}
         qg_columns = {row["name"] for row in query_all("PRAGMA table_info(qg_nodes)")}
+        rule_columns = {row["name"] for row in query_all("PRAGMA table_info(business_check_rules)")}
+        execution_columns = {row["name"] for row in query_all("PRAGMA table_info(auto_check_execution_rules)")}
+        table_names = {row["name"] for row in query_all("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
         self.assertNotIn("project_code", project_columns)
         self.assertNotIn("node_name", qg_columns)
         self.assertNotIn("is_active", qg_columns)
+        self.assertNotIn("created_at", qg_columns)
+        self.assertNotIn("updated_at", qg_columns)
+        self.assertNotIn("qg_node_id", rule_columns)
+        self.assertNotIn("execution_code", execution_columns)
+        self.assertNotIn("config_version", execution_columns)
+        self.assertNotIn("vdrive_scan_batches", table_names)
+        self.assertNotIn("vdrive_folders", table_names)
+        self.assertNotIn("vdrive_files", table_names)
 
     def test_user_permission_and_qg_unique_constraints(self):
         from app.core.database import execute
@@ -61,40 +72,41 @@ class DatabaseConstraintTest(unittest.TestCase):
                 (1, "V-UNIQUE", "Duplicate version", 1),
             )
 
-        execute(
+        rule_result = execute(
             """
             INSERT INTO business_check_rules(
-                business_rule_version_id, qg_node_id, rule_code, item_name, item_type, check_type
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                business_rule_version_id, rule_code, item_name, item_type, check_type
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            (1, 1, "RULE_UNIQUE", "Rule unique", "manual", "manual"),
+            (1, "RULE_UNIQUE", "Rule unique", "manual", "manual"),
         )
+        rule_id = int(rule_result.lastrowid)
         with self.assertRaises(sqlite3.IntegrityError):
             execute(
                 """
                 INSERT INTO business_check_rules(
-                    business_rule_version_id, qg_node_id, rule_code, item_name, item_type, check_type
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    business_rule_version_id, rule_code, item_name, item_type, check_type
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
-                (1, 1, "RULE_UNIQUE", "Duplicate rule", "manual", "manual"),
+                (1, "RULE_UNIQUE", "Duplicate rule", "manual", "manual"),
             )
 
         execute(
             """
             INSERT INTO auto_check_execution_rules(
-                business_check_rule_id, execution_code, execution_mode, adapter_type, config_json, config_version, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                business_check_rule_id, execution_mode, adapter_type, config_json, created_by
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            (1, "EXEC_UNIQUE", "file_existence", "vdrive", "{}", "V1", 1),
+            (rule_id, "file_existence", "vdrive", "{}", 1),
         )
         with self.assertRaises(sqlite3.IntegrityError):
             execute(
                 """
                 INSERT INTO auto_check_execution_rules(
-                    business_check_rule_id, execution_code, execution_mode, adapter_type, config_json, config_version, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    business_check_rule_id, execution_mode, adapter_type, config_json, created_by
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
-                (1, "EXEC_UNIQUE", "file_existence", "vdrive", "{}", "V1", 1),
+                (rule_id, "file_existence", "vdrive", "{}", 1),
             )
 
     def test_inspection_task_snapshot_round_and_report_unique_constraints(self):

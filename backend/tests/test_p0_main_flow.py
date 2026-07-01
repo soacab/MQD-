@@ -71,10 +71,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "P0_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -204,10 +202,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "DASHBOARD_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -253,10 +249,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "DUPLICATE_CONFIRM_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -299,10 +293,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "VOID_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -334,10 +326,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "AUDIT_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -456,10 +446,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "PROJECT_FILTER_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -495,10 +483,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "ORDER_BLOCK_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -554,10 +540,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "ARCHIVE_PROJECT_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -641,10 +625,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "PREPARE_HISTORY_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -856,10 +838,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "DRAFT_COPY_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -876,7 +856,7 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(draft_data["change_summary"], "基于 V-P0 编辑")
         self.assertEqual([rule["rule_code"] for rule in draft_data["business_check_rules"]], ["P0_MANUAL", "P0_AUTO"])
         copied_auto = next(rule for rule in draft_data["business_check_rules"] if rule["rule_code"] == "P0_AUTO")
-        self.assertEqual(copied_auto["auto_check_execution_rules"][0]["execution_code"], "DRAFT_COPY_FILE_EXISTS")
+        self.assertEqual(copied_auto["auto_check_execution_rules"][0]["execution_mode"], "file_existence")
 
         repeat = self.client.post("/api/v1/qg-nodes/1/editable-rule-version", headers=self.headers)
         self.assertEqual(repeat.status_code, 200, repeat.text)
@@ -888,10 +868,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "PUBLISH_SUMMARY_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -915,10 +893,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "P0_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -948,10 +924,8 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "P0_FILE_EXISTS",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V1",
                 "is_enabled": True,
                 "config_json": {"mock": True},
             },
@@ -984,16 +958,52 @@ class P0MainFlowTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_code": "AFTER_PUBLISH",
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
-                "config_version": "V2",
                 "is_enabled": True,
                 "config_json": {},
             },
         )
         self.assertEqual(extra_execution.status_code, 400)
         self.assertEqual(extra_execution.json()["error"]["code"], "RULE_VERSION_NOT_DRAFT")
+
+    def test_completed_task_can_be_recreated_with_unique_task_no(self):
+        from app.core.database import execute
+
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+        )
+        self.assertEqual(published.status_code, 200, published.text)
+
+        first = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        first_id = first.json()["data"]["inspection_task_id"]
+        execute("UPDATE inspection_tasks SET status = ? WHERE id = ?", ("completed", first_id))
+
+        second = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertNotEqual(first.json()["data"]["task_no"], second.json()["data"]["task_no"])
 
     def _create_project_and_rules(self):
         project = self.client.post(

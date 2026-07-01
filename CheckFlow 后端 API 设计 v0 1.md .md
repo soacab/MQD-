@@ -603,10 +603,10 @@ POST /api/v1/vdrive/validate-folder-link
 
 ---
 
-## 7.2 扫描项目 VDrive 文件夹
+## 7.2 识别检查项候选文件
 
 ```
-POST /api/v1/projects/{project_id}/vdrive/scan
+POST /api/v1/inspection-items/{item_id}/candidate-files/scan
 ```
 
 请求：
@@ -621,11 +621,10 @@ POST /api/v1/projects/{project_id}/vdrive/scan
 系统动作：
 
 ```
-1. 创建 vdrive_scan_batches。
-2. 调用 VDrive 获取文件夹和文件。
-3. 写入 vdrive_folders。
-4. 写入 vdrive_files。
-5. 更新 scan_status。
+1. 基于项目 VDrive 文件夹链接读取文件元数据。
+2. 按检查项自动执行配置识别候选文件。
+3. 写入 auto_check_candidate_files。
+4. 将候选文件和推荐依据返回给前端确认。
 ```
 
 ---
@@ -851,10 +850,8 @@ POST /api/v1/business-check-rules/{rule_id}/auto-check-execution-rules
 
 ```
 {
-  "execution_code": "PFMEA_FILE_EXISTENCE_V1",
   "execution_mode": "file_existence",
   "adapter_type": "vdrive",
-  "config_version": "V1",
   "is_enabled": true,
   "config_json": {
     "execution_mode": "file_existence",
@@ -905,10 +902,8 @@ POST /api/v1/business-check-rules/{rule_id}/auto-check-execution-rules
 
 ```
 {
-  "execution_code": "DFA_CONTENT_CHECK_V1",
   "execution_mode": "file_content",
   "adapter_type": "vdrive",
-  "config_version": "V1",
   "is_enabled": true,
   "config_json": {
     "execution_mode": "file_content",
@@ -963,10 +958,8 @@ POST /api/v1/business-check-rules/{rule_id}/auto-check-execution-rules
 
 ```
 {
-  "execution_code": "PIL_QMS_CHECK_V1",
   "execution_mode": "system_direct",
   "adapter_type": "qms",
-  "config_version": "V1",
   "is_enabled": true,
   "config_json": {
     "execution_mode": "system_direct",

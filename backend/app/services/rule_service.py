@@ -1,4 +1,5 @@
 from typing import Any
+from sqlite3 import IntegrityError
 
 from app.core.database import execute, from_json, query_all, query_one, to_json, transaction
 from app.core.enums import Permission, RuleItemType, RuleVersionStatus
@@ -81,13 +82,12 @@ def copy_business_rules_to_draft(source_version_id: int, draft_version_id: int, 
         cur = execute(
             """
             INSERT INTO business_check_rules(
-                business_rule_version_id, qg_node_id, rule_code, item_name, item_type,
+                business_rule_version_id, rule_code, item_name, item_type,
                 check_type, checklist_requirement, owner_dept, is_apqp, is_active, sort_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 draft_version_id,
-                rule["qg_node_id"],
                 rule["rule_code"],
                 rule["item_name"],
                 rule["item_type"],
@@ -108,17 +108,15 @@ def copy_business_rules_to_draft(source_version_id: int, draft_version_id: int, 
             execute(
                 """
                 INSERT INTO auto_check_execution_rules(
-                    business_check_rule_id, execution_code, execution_mode, adapter_type,
-                    config_json, config_version, is_enabled, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    business_check_rule_id, execution_mode, adapter_type,
+                    config_json, is_enabled, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     draft_rule_id,
-                    execution_rule["execution_code"],
                     execution_rule["execution_mode"],
                     execution_rule["adapter_type"],
                     execution_rule["config_json"],
-                    execution_rule["config_version"],
                     execution_rule["is_enabled"],
                     actor_id,
                 ),
@@ -196,13 +194,12 @@ def create_business_rule(version_id: int, payload: dict[str, Any], user: dict[st
     cur = execute(
         """
         INSERT INTO business_check_rules(
-            business_rule_version_id, qg_node_id, rule_code, item_name, item_type,
+            business_rule_version_id, rule_code, item_name, item_type,
             check_type, checklist_requirement, owner_dept, is_apqp, is_active, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             version_id,
-            version["qg_node_id"],
             payload["rule_code"],
             payload["item_name"],
             payload["item_type"],
@@ -235,24 +232,25 @@ def update_business_rule(rule_id: int, payload: dict[str, Any], user: dict[str, 
 def create_execution_rule(rule_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_rule(rule_id)
-    cur = execute(
-        """
-        INSERT INTO auto_check_execution_rules(
-            business_check_rule_id, execution_code, execution_mode, adapter_type,
-            config_json, config_version, is_enabled, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            rule_id,
-            payload["execution_code"],
-            payload["execution_mode"],
-            payload["adapter_type"],
-            to_json(payload.get("config_json", {})),
-            payload["config_version"],
-            1 if payload.get("is_enabled", True) else 0,
-            user["id"],
-        ),
-    )
+    try:
+        cur = execute(
+            """
+            INSERT INTO auto_check_execution_rules(
+                business_check_rule_id, execution_mode, adapter_type,
+                config_json, is_enabled, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rule_id,
+                payload["execution_mode"],
+                payload["adapter_type"],
+                to_json(payload.get("config_json", {})),
+                1 if payload.get("is_enabled", True) else 0,
+                user["id"],
+            ),
+        )
+    except IntegrityError as exc:
+        raise BusinessError("AUTO_RULE_EXECUTION_EXISTS", "一个检查项只能配置一条自动执行规则") from exc
     audit("create_execution_rule", "auto_check_execution_rule", cur.lastrowid, user["id"], payload)
     return query_one("SELECT * FROM auto_check_execution_rules WHERE id = ?", (cur.lastrowid,))
 
@@ -260,7 +258,7 @@ def create_execution_rule(rule_id: int, payload: dict[str, Any], user: dict[str,
 def update_execution_rule(execution_rule_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.RULES_ADMIN})
     ensure_rule_version_draft_for_execution_rule(execution_rule_id)
-    for field in ("execution_code", "execution_mode", "adapter_type", "config_version"):
+    for field in ("execution_mode", "adapter_type"):
         if field in payload:
             execute(f"UPDATE auto_check_execution_rules SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (payload[field], execution_rule_id))
     if "config_json" in payload:

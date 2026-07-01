@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import uuid4
 
 from app.core.database import execute, from_json, query_all, query_one, to_json, transaction
 from app.core.enums import (
@@ -146,16 +147,18 @@ def create_inspection_task_for_project(project_id: int, qg_node_id: int, user: d
     if active:
         raise BusinessError("ACTIVE_TASK_EXISTS", "同项目同节点已有进行中或整改中任务")
 
-    task_no = f"IT-{project_id}-{qg_node_id}-{version['id']}"
+    temporary_task_no = f"IT-PENDING-{uuid4().hex}"
     with transaction():
         cur = execute(
             """
             INSERT INTO inspection_tasks(project_id, qg_node_id, task_no, status, current_round_no, created_by)
             VALUES (?, ?, ?, ?, 1, ?)
             """,
-            (project_id, qg_node_id, task_no, InspectionTaskStatus.RUNNING, user["id"]),
+            (project_id, qg_node_id, temporary_task_no, InspectionTaskStatus.RUNNING, user["id"]),
         )
         task_id = cur.lastrowid
+        task_no = f"IT-{task_id}"
+        execute("UPDATE inspection_tasks SET task_no = ? WHERE id = ?", (task_no, task_id))
         business_snapshot, execution_snapshot = rule_service.build_rule_snapshots(version["id"])
         snapshot_cur = execute(
             """
@@ -186,6 +189,7 @@ def create_inspection_task_for_project(project_id: int, qg_node_id: int, user: d
         "inspection_task_id": task_id,
         "project_id": project["id"],
         "qg_node_id": qg_node_id,
+        "task_no": task_no,
         "status": InspectionTaskStatus.RUNNING.value,
         "current_round_no": 1,
         "round_id": round_id,

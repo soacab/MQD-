@@ -254,10 +254,8 @@ export default function RulesPage() {
         (!editingRuleId || !(existingRule?.auto_check_execution_rules || []).length);
       if (needsDefaultExecutionRule) {
         await createExecutionRule(savedRule.id, {
-          execution_code: `${savedRule.rule_code}_EXEC`,
           execution_mode: savedRule.item_type === "system" ? "system_direct" : "file_existence",
           adapter_type: savedRule.item_type === "system" ? "mock_system" : "vdrive",
-          config_version: "V1",
           is_enabled: true,
           config_json: { mock: true }
         });

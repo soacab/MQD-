@@ -164,7 +164,6 @@ export type RuleChangeDetail = {
 export type BusinessRule = {
   id: number;
   business_rule_version_id: number;
-  qg_node_id: number;
   rule_code: string;
   item_name: string;
   item_type: string;
@@ -180,10 +179,8 @@ export type BusinessRule = {
 export type AutoCheckExecutionRule = {
   id: number;
   business_check_rule_id: number;
-  execution_code: string;
   execution_mode: string;
   adapter_type: string;
-  config_version: string;
   is_enabled: number;
 };
 

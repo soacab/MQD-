@@ -96,9 +96,7 @@ CREATE TABLE IF NOT EXISTS project_models (
 CREATE TABLE IF NOT EXISTS qg_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     node_code TEXT NOT NULL UNIQUE,
-    sort_order INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    sort_order INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS business_rule_versions (
@@ -118,7 +116,6 @@ CREATE TABLE IF NOT EXISTS business_rule_versions (
 CREATE TABLE IF NOT EXISTS business_check_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     business_rule_version_id INTEGER NOT NULL REFERENCES business_rule_versions(id),
-    qg_node_id INTEGER NOT NULL REFERENCES qg_nodes(id),
     rule_code TEXT NOT NULL,
     item_name TEXT NOT NULL,
     item_type TEXT NOT NULL,
@@ -136,16 +133,14 @@ CREATE TABLE IF NOT EXISTS business_check_rules (
 CREATE TABLE IF NOT EXISTS auto_check_execution_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     business_check_rule_id INTEGER NOT NULL REFERENCES business_check_rules(id),
-    execution_code TEXT NOT NULL,
     execution_mode TEXT NOT NULL,
     adapter_type TEXT NOT NULL,
     config_json TEXT NOT NULL,
-    config_version TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(business_check_rule_id, execution_code)
+    UNIQUE(business_check_rule_id)
 );
 
 CREATE TABLE IF NOT EXISTS inspection_tasks (
@@ -359,45 +354,6 @@ CREATE TABLE IF NOT EXISTS report_corrections (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS vdrive_scan_batches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL REFERENCES projects(id),
-    inspection_task_id INTEGER REFERENCES inspection_tasks(id),
-    inspection_round_id INTEGER REFERENCES inspection_rounds(id),
-    scan_status TEXT NOT NULL,
-    folders_count INTEGER NOT NULL DEFAULT 0,
-    files_count INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    finished_at TEXT,
-    error_message TEXT
-);
-
-CREATE TABLE IF NOT EXISTS vdrive_folders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_batch_id INTEGER NOT NULL REFERENCES vdrive_scan_batches(id),
-    folder_guid TEXT NOT NULL,
-    folder_id INTEGER,
-    folder_name TEXT,
-    folder_path TEXT,
-    parent_folder_guid TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS vdrive_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_batch_id INTEGER NOT NULL REFERENCES vdrive_scan_batches(id),
-    folder_guid TEXT,
-    vdrive_file_id INTEGER,
-    file_guid TEXT,
-    file_name TEXT,
-    file_ext TEXT,
-    file_path TEXT,
-    file_size INTEGER,
-    file_version TEXT,
-    created_time TEXT,
-    modified_time TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
 """
 
 

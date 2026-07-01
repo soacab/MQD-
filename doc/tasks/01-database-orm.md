@@ -25,7 +25,7 @@
 - [x] T02：建立项目域表结构与 SQL helper 访问能力：`projects`、`project_orders`、`project_models`；验收：项目、加单、机型关系可读写。
 - [x] T03：建立规则域表结构与 SQL helper 访问能力：`qg_nodes`、`business_rule_versions`、`business_check_rules`、`auto_check_execution_rules`、`rule_snapshots`；验收：业务规则、自动执行规则和快照可读写。
 - [x] T04：建立点检域表结构与 SQL helper 访问能力：`inspection_tasks`、`inspection_rounds`、`inspection_items`、`engineer_decisions`、`rectification_items`、`followup_items`；验收：一任务多轮、多检查项和整改复查关系可读写。
-- [x] T05：建立自动检查与 VDrive 快照表结构；验收：自动检查结果、候选文件、扫描批次、文件夹、文件表可迁移，P1 前暂不接真实扫描。
+- [x] T05：建立自动检查与 VDrive 候选文件表结构；验收：自动检查结果、候选文件和文件解析任务表可迁移，P1 前暂不接真实 VDrive Adapter。
 - [x] T06：建立报告域表结构与 SQL helper 访问能力：`inspection_reports`、`report_items`、`report_corrections`；验收：一个任务一份报告，报告更正表可迁移，并预留 `report_id`、修改前结论、修改后结论和更正原因字段。报告更正业务 API 仍归属 14 模块。
 - [x] T07：创建 Alembic 迁移；验收：全量迁移可在空库执行成功。
 - [x] T08：实现唯一约束和活跃任务部分唯一索引；验收：核心唯一约束和活跃任务部分唯一索引有 unittest 覆盖。
@@ -46,4 +46,4 @@
 后续扩展 P1 前，优先控制 `backend/app/main.py` 继续膨胀；如需拆分服务、路由和仓储，应在轻量 SQL helper 路线下逐步抽取，不在当前阶段引入全量 SQLAlchemy ORM 迁移。
 
 ## 注意事项
-`file_parse_jobs` 可建表但不接业务；P2 前不要实现文件内容解析流程。
+一期包含文件内容解析，保留 `file_parse_jobs`；VDrive 不保存完整目录快照，只保存检查项候选文件。
