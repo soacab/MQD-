@@ -114,11 +114,13 @@ PYTHONPATH=backend uv run python -c "from app.seed import seed_database; seed_da
 .venv/bin/python -m unittest discover -s backend/tests -p "test_*.py" -v
 cd frontend
 npm test
+npm run test:e2e
 npm run build
 ```
 
 当前默认后端验收使用项目 `.venv` 中的 `unittest`。`uv run pytest` 暂不作为默认测试入口；在修正本机 Python / pytest 环境和依赖配置前，它可能不会加载项目 `.venv` 中的 FastAPI 依赖。
 当前前端未配置 ESLint，`npm run lint` 不是可用验收命令。
+前端 E2E 测试使用 Playwright 驱动 Microsoft Edge，并在测试内 mock API 响应；运行 `npm run test:e2e` 前不需要单独启动真实后端。
 
 ## Docker 化节奏
 
