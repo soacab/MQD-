@@ -255,6 +255,15 @@ describe("frontend structure", () => {
     }
 
     for (const snippet of [
+      "historyVersions",
+      "version.status !== \"draft\"",
+      "historyVersions.map",
+      "!historyVersions.length"
+    ]) {
+      assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should keep draft versions out of version history`);
+    }
+
+    for (const snippet of [
       "is_apqp",
       "is_active",
       "停用人工检查项",

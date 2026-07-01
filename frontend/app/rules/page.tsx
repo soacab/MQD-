@@ -153,6 +153,7 @@ export default function RulesPage() {
   const manualRules = rules.filter((rule) => rule.item_type === "manual" || rule.item_type === "inherit");
   const visibleRules = activeTab === "auto" ? autoRules : manualRules;
   const draftVersion = versions.find((version) => version.status === "draft") || null;
+  const historyVersions = versions.filter((version) => version.status !== "draft");
 
   const selectedVersionMeta = useMemo(() => {
     if (!selectedVersion) {
@@ -525,7 +526,7 @@ export default function RulesPage() {
               <button type="button" onClick={() => setHistoryOpen(false)}>×</button>
             </header>
             <div className="rules-history-list">
-              {versions.map((version) => (
+              {historyVersions.map((version) => (
                 <article key={version.id}>
                   <div className="rules-history-main">
                     <strong>{version.version_no}</strong>
@@ -548,7 +549,7 @@ export default function RulesPage() {
                   ) : null}
                 </article>
               ))}
-              {!versions.length ? <p>暂无版本历史。</p> : null}
+              {!historyVersions.length ? <p>暂无版本历史。</p> : null}
             </div>
           </aside>
         </div>
