@@ -64,7 +64,7 @@ export default function AdminPage() {
       if (!me.permissions.includes("super_admin")) {
         setUsers([]);
         if (clearMessage) {
-          setMessage("只读模式：仅权限管理员可编辑用户、权限和系统设置。");
+          setMessage("仅权限管理员可编辑用户、权限和系统设置。");
         }
         return;
       }
@@ -141,7 +141,7 @@ export default function AdminPage() {
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canManageAccounts) {
-      setMessage("只读模式：仅权限管理员可编辑用户和权限。");
+      setMessage("仅权限管理员可编辑用户和权限。");
       return;
     }
     if (!form.permissions.length) {
@@ -189,7 +189,7 @@ export default function AdminPage() {
 
   async function handleToggleStatus(user: User) {
     if (!canManageAccounts) {
-      setMessage("只读模式：仅权限管理员可编辑用户和权限。");
+      setMessage("仅权限管理员可编辑用户和权限。");
       return;
     }
     if (isCurrentUser(user)) {
@@ -212,7 +212,7 @@ export default function AdminPage() {
 
   async function handleDelete(user: User) {
     if (!canManageAccounts) {
-      setMessage("只读模式：仅权限管理员可编辑用户和权限。");
+      setMessage("仅权限管理员可编辑用户和权限。");
       return;
     }
     if (isCurrentUser(user)) {
@@ -238,7 +238,7 @@ export default function AdminPage() {
   async function handleSaveSetting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canManageAccounts) {
-      setMessage("只读模式：仅权限管理员可保存系统设置。");
+      setMessage("仅权限管理员可保存系统设置。");
       return;
     }
     try {
@@ -278,9 +278,6 @@ export default function AdminPage() {
 
         <div className="account-content">
           {message ? <p className="account-notice">{message}</p> : null}
-          <p className="field-governance-note">
-            字段治理：后台仅展示方案 4.1 和原型确认的 UID、姓名、公司邮箱、用户权限、状态与自动检查开关；权限管理不默认获得点检、规则或项目管理能力。
-          </p>
 
           {activeSection === "users" ? (
             <section className="account-view active" aria-label="用户与权限">
@@ -291,7 +288,7 @@ export default function AdminPage() {
                       <h1 className="account-title">用户与权限</h1>
                       <div className="account-sub">共 {users.length} 个账号 · 启用 {activeCount} 个</div>
                       {!canManageAccounts ? (
-                        <div className="account-readonly-note">只读模式：仅权限管理员可编辑用户和权限</div>
+                        <div className="account-readonly-note">仅权限管理员可编辑用户和权限</div>
                       ) : null}
                     </div>
                     <div className="account-filters">
@@ -423,7 +420,7 @@ export default function AdminPage() {
                     <h1 className="account-title">系统设置</h1>
                     <div className="account-sub">所有用户可查看，只有权限管理员可保存修改。</div>
                     {!canManageAccounts ? (
-                      <div className="account-readonly-note">只读模式：仅权限管理员可保存系统设置</div>
+                      <div className="account-readonly-note">仅权限管理员可保存系统设置</div>
                     ) : null}
                   </div>
                 </div>

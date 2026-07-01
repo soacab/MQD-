@@ -106,6 +106,10 @@ export function AppNav() {
   const isRules = pathname.startsWith("/rules");
   const canCreateTask = Boolean(user?.permissions.includes("inspection_engineer"));
 
+  if (pathname.startsWith("/login")) {
+    return null;
+  }
+
   function openNewTaskModal() {
     window.dispatchEvent(new CustomEvent("checkflow:new-task"));
   }

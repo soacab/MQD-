@@ -136,6 +136,7 @@ export default function RulesPage() {
   const [activeTab, setActiveTab] = useState<"auto" | "manual">("auto");
   const [ruleForm, setRuleForm] = useState(emptyRuleForm);
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
+  const [editingRuleSource, setEditingRuleSource] = useState<BusinessRule | null>(null);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [ruleModalReadonly, setRuleModalReadonly] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -294,12 +295,13 @@ export default function RulesPage() {
 
   async function openCreateRuleModal() {
     if (!canManageRules) {
-      setMessage("只读模式：规则管理员可编辑，其他用户只能查看。");
+      setMessage("仅规则管理员可编辑，其他用户只能查看。");
       return;
     }
     try {
       await ensureEditableVersion();
       setEditingRuleId(null);
+      setEditingRuleSource(null);
       setRuleModalReadonly(false);
       setRuleForm(emptyRuleForm);
       setRuleModalOpen(true);
@@ -311,6 +313,7 @@ export default function RulesPage() {
   async function openRuleModal(rule: BusinessRule) {
     if (!canManageRules) {
       setEditingRuleId(rule.id);
+      setEditingRuleSource(rule);
       setRuleModalReadonly(true);
       setRuleForm(ruleFormFromRule(rule));
       setRuleModalOpen(true);
@@ -320,6 +323,7 @@ export default function RulesPage() {
       const editable = await ensureEditableVersion(rule);
       const targetRule = editable.rule || rule;
       setEditingRuleId(targetRule.id);
+      setEditingRuleSource(targetRule);
       setRuleModalReadonly(false);
       setRuleForm(ruleFormFromRule(targetRule));
       setRuleModalOpen(true);
@@ -335,7 +339,7 @@ export default function RulesPage() {
       return;
     }
     if (!canManageRules) {
-      setMessage("只读模式：规则管理员可编辑，其他用户只能查看。");
+      setMessage("仅规则管理员可编辑，其他用户只能查看。");
       return;
     }
     try {
@@ -355,9 +359,8 @@ export default function RulesPage() {
       if (wasCreating) {
         setActiveTab("manual");
       }
-      setRuleModalOpen(false);
-      setEditingRuleId(null);
-      setMessage(editingRuleId ? "检查项已更新，发布规则版本后生效。" : "人工检查项已新增，发布规则版本后生效。");
+      closeRuleModal();
+      setMessage("提交升级建议已保存到未发布草稿。");
       await loadNode(selectedVersion.qg_node_id, selectedVersion.id);
       await refreshRuleReleaseDraft(true);
     } catch (error) {
@@ -367,7 +370,7 @@ export default function RulesPage() {
 
   async function stopManualRule(rule: BusinessRule) {
     if (!canManageRules) {
-      setMessage("只读模式：规则管理员可停用人工检查项。");
+      setMessage("仅规则管理员可删除人工检查项。");
       return;
     }
     if (rule.item_type !== "manual") {
@@ -378,12 +381,19 @@ export default function RulesPage() {
       const editable = await ensureEditableVersion(rule);
       const targetRule = editable.rule || rule;
       await updateBusinessRule(targetRule.id, { is_active: false });
-      setMessage("停用人工检查项已保存到未发布规则变更。");
+      closeRuleModal();
+      setMessage("删除检查项已保存到未发布规则变更。");
       await loadNode(editable.version.qg_node_id, editable.version.id);
       await refreshRuleReleaseDraft(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "停用人工检查项失败");
+      setMessage(error instanceof Error ? error.message : "删除人工检查项失败");
     }
+  }
+
+  function closeRuleModal() {
+    setRuleModalOpen(false);
+    setEditingRuleId(null);
+    setEditingRuleSource(null);
   }
 
   async function confirmPublish() {
@@ -425,7 +435,7 @@ export default function RulesPage() {
   return (
     <main className="page rules-workspace">
       {message ? <p className="notice">{message}</p> : null}
-      {!canManageRules ? <p className="notice">只读模式：规则管理员可编辑，当前用户只能查看规则配置和版本历史。</p> : null}
+      {!canManageRules ? <p className="notice">当前用户只能查看规则配置和版本历史，编辑需规则管理员权限。</p> : null}
 
       <section className="rules-board">
         <aside className="rules-node-nav" aria-label="检查阶段">
@@ -496,14 +506,15 @@ export default function RulesPage() {
                     <td>{asBoolean(rule.is_apqp) ? <span className="rules-check">✓</span> : "-"}</td>
                     <td><span className={asBoolean(rule.is_active) ? "rules-status active" : "rules-status disabled"}>{asBoolean(rule.is_active) ? "启用" : "停用"}</span></td>
                     <td className="rules-actions">
-                      <button type="button" className="link-button" onClick={() => void openRuleModal(rule)}>
-                        {canManageRules ? "编辑" : "查看"}
+                      <button
+                        type="button"
+                        className="rules-action-btn"
+                        onClick={() => void openRuleModal(rule)}
+                        aria-label={canManageRules ? "编辑检查项" : "查看检查项"}
+                        title={canManageRules ? "编辑检查项" : "查看检查项"}
+                      >
+                        {canManageRules ? "✎" : "↗"}
                       </button>
-                      {rule.item_type === "manual" ? (
-                        <button type="button" className="secondary-button" disabled={!canManageRules || !asBoolean(rule.is_active)} onClick={() => void stopManualRule(rule)}>
-                          停用人工检查项
-                        </button>
-                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -560,7 +571,7 @@ export default function RulesPage() {
           <form className="rules-modal" onSubmit={handleSaveRule}>
             <header>
               <h2>{ruleModalReadonly ? "检查项详情" : editingRuleId ? "编辑检查项" : "新增人工检查项"}</h2>
-              <button type="button" onClick={() => setRuleModalOpen(false)}>×</button>
+              <button type="button" onClick={() => closeRuleModal()}>×</button>
             </header>
             <label>
               检查项名称
@@ -590,12 +601,26 @@ export default function RulesPage() {
                 </select>
               </label>
             </div>
-            {!ruleModalReadonly ? (
-              <footer>
-                <button type="submit">确认</button>
-                <button type="button" className="secondary-button" onClick={() => setRuleModalOpen(false)}>取消</button>
-              </footer>
-            ) : null}
+            <footer>
+              {!ruleModalReadonly ? (
+                <>
+                  <button type="submit" disabled={!selectedVersion || selectedVersion.status !== "draft"}>
+                    提交升级建议
+                  </button>
+                  {editingRuleSource?.item_type === "manual" ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void stopManualRule(editingRuleSource)}
+                      disabled={!asBoolean(editingRuleSource.is_active)}
+                    >
+                      删除检查项
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+              <button type="button" className="secondary-button" onClick={() => closeRuleModal()}>关闭</button>
+            </footer>
           </form>
         </div>
       ) : null}

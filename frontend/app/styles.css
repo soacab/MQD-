@@ -1375,6 +1375,158 @@ nav a:hover {
   background: #f6f7f9;
 }
 
+.login-shell {
+  min-height: 100vh;
+  background: #eef2f3;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  position: relative;
+}
+
+.login-card {
+  width: min(100%, 468px);
+  border: 1px solid #e4e8ef;
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-bg-surface);
+  box-shadow: 0 8px 22px rgba(26, 35, 50, 0.1);
+  padding: 32px 28px 28px;
+}
+
+.login-form {
+  display: grid;
+  gap: 18px;
+}
+
+.login-head {
+  margin-bottom: 4px;
+}
+
+.login-head h1 {
+  margin: 0;
+  color: var(--cf-text-primary);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.login-head p {
+  margin: 8px 0 0;
+  color: #8a96a4;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.login-field {
+  display: grid;
+  gap: 8px;
+  color: var(--cf-text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-field input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #ccd4df;
+  border-radius: var(--cf-radius-md);
+  background: #fff;
+  color: var(--cf-text-primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+
+.login-field input:focus-visible {
+  outline: 2px solid rgba(67, 56, 202, 0.22);
+  outline-offset: 1px;
+  border-color: #8e96f0;
+}
+
+.login-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: #8a96a4;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.login-remember input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--cf-primary-700);
+}
+
+.login-submit {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--cf-primary-700);
+  border-radius: var(--cf-radius-md);
+  background: var(--cf-primary-700);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.login-submit:hover:not(:disabled),
+.login-submit:focus-visible {
+  background: #24344a;
+  border-color: #24344a;
+}
+
+.login-submit:disabled {
+  border-color: #9aa4b2;
+  background: #9aa4b2;
+  cursor: not-allowed;
+}
+
+.login-session {
+  margin-top: 18px;
+  border-top: 1px solid var(--cf-border-subtle);
+  padding-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--cf-text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-session a,
+.login-session button {
+  border: 0;
+  background: transparent;
+  color: #245fb6;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0;
+}
+
+.login-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  border-radius: var(--cf-radius-md);
+  background: #1a2332;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(26, 35, 50, 0.18);
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
 .page-header {
   margin-bottom: 22px;
 }
@@ -2613,10 +2765,11 @@ tbody tr:hover {
 }
 
 .rules-actions {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
 }
 
-.rules-actions .link-button,
+.rules-actions .rules-action-btn,
 .rules-history-drawer .link-button {
   width: auto;
   border: 0;
@@ -2626,10 +2779,31 @@ tbody tr:hover {
   font-weight: 900;
 }
 
-.rules-actions .secondary-button {
-  min-height: 34px;
-  padding: 6px 10px;
-  font-size: 13px;
+.rules-action-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #d3dced;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b7690;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rules-action-btn:hover,
+.rules-action-btn:focus-visible {
+  color: #543fe8;
+  border-color: #d1d8f5;
+  background: #f8f9ff;
+}
+
+.rules-table th:nth-child(8),
+.rules-table td:nth-child(8) {
+  width: 74px;
+  text-align: right;
 }
 
 .rules-empty {
@@ -3661,6 +3835,19 @@ tbody tr:hover {
 
   .sidebar {
     position: static;
+  }
+
+  .login-shell {
+    padding: 20px;
+  }
+
+  .login-card {
+    padding: 26px 20px 22px;
+  }
+
+  .login-session {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .topbar {

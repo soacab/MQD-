@@ -86,7 +86,17 @@ describe("frontend structure", () => {
 
   it("turns P0 workflow pages into API-backed client pages", () => {
     const pageExpectations = {
-      "app/login/page.tsx": ["use client", "login(", "saveSession"],
+      "app/login/page.tsx": [
+        "use client",
+        "login(",
+        "saveSession",
+        "login-shell",
+        "登录工作台",
+        "UID00001",
+        "记住本次身份",
+        "登录进入",
+        "login-toast"
+      ],
       "app/admin/page.tsx": [
         "use client",
         "listUsers(",
@@ -94,7 +104,6 @@ describe("frontend structure", () => {
         "updateUser(",
         "deleteUser(",
         "权限管理",
-        "只读模式",
         "确认删除 UID",
         "account-body",
         "account-sidebar",
@@ -120,6 +129,9 @@ describe("frontend structure", () => {
         assert.match(source, new RegExp(snippet.replaceAll("(", "\\(")), `${page} should contain ${snippet}`);
       }
     }
+
+    const loginPage = readFileSync(resolve(root, "app/login/page.tsx"), "utf8");
+    assert.doesNotMatch(loginPage, /field-governance-note/, "login page should not show internal field governance copy");
   });
 
   it("exposes account permission administration API helpers", () => {
@@ -155,6 +167,8 @@ describe("frontend structure", () => {
     ]) {
       assert.match(adminPage, new RegExp(snippet.replaceAll("(", "\\(").replaceAll(")", "\\)")), `admin page should contain ${snippet}`);
     }
+    assert.doesNotMatch(adminPage, /只读模式/, "admin page should not expose readonly-mode copy");
+    assert.doesNotMatch(adminPage, /field-governance-note/, "admin page should not show internal field governance copy");
   });
 
   it("supports P0 experience hardening for VDrive, rules, and dashboard", () => {
@@ -240,7 +254,6 @@ describe("frontend structure", () => {
       "canManageRules",
       "updateBusinessRule(",
       "规则管理员可编辑",
-      "只读模式",
       "检查阶段",
       "rules-workspace",
       "rules-node-nav",
@@ -253,6 +266,7 @@ describe("frontend structure", () => {
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
+    assert.doesNotMatch(rulesPage, /只读模式/, "rules page should not expose readonly-mode copy");
 
     for (const snippet of [
       "historyVersions",
@@ -266,7 +280,9 @@ describe("frontend structure", () => {
     for (const snippet of [
       "is_apqp",
       "is_active",
-      "停用人工检查项",
+      "rules-action-btn",
+      "编辑检查项",
+      "查看检查项",
       "published_by_name",
       "is_current",
       "change_details",
@@ -278,6 +294,9 @@ describe("frontend structure", () => {
       "确认发布规则版本",
       "当前版本",
       "新增人工检查项",
+      "提交升级建议",
+      "删除检查项",
+      "关闭",
       "未发布规则变更"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
