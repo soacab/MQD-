@@ -1,20 +1,15 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { getCurrentUser, login, type User } from "@/lib/api";
-import { clearSession, getStoredUser, saveSession } from "@/lib/session";
+import { FormEvent, useState } from "react";
+import { getCurrentUser, login } from "@/lib/api";
+import { saveSession } from "@/lib/session";
 
 export default function LoginPage() {
   const [uid, setUid] = useState("UID00001");
   const [password, setPassword] = useState("admin");
   const [rememberIdentity, setRememberIdentity] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setUser(getStoredUser());
-  }, []);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -23,20 +18,13 @@ export default function LoginPage() {
     try {
       const result = await login(uid, password);
       saveSession(result);
-      setUser(result.user);
-      setMessage("登录成功，已保存当前会话。");
+      setMessage("登录成功。");
       await getCurrentUser();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "登录失败");
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleLogout() {
-    clearSession();
-    setUser(null);
-    setMessage("已退出登录。");
   }
 
   return (
@@ -76,18 +64,6 @@ export default function LoginPage() {
             {loading ? "登录中..." : "登录进入"}
           </button>
         </form>
-
-        {user ? (
-          <div className="login-session" aria-label="当前会话">
-            <span>
-              {user.name} · {user.uid}
-            </span>
-            <a href="/">进入工作台</a>
-            <button type="button" onClick={handleLogout}>
-              退出登录
-            </button>
-          </div>
-        ) : null}
       </section>
 
       {message ? <div className="login-toast" role="status">{message}</div> : null}

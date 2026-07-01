@@ -1486,31 +1486,6 @@ nav a:hover {
   cursor: not-allowed;
 }
 
-.login-session {
-  margin-top: 18px;
-  border-top: 1px solid var(--cf-border-subtle);
-  padding-top: 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  color: var(--cf-text-secondary);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.login-session a,
-.login-session button {
-  border: 0;
-  background: transparent;
-  color: #245fb6;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 800;
-  padding: 0;
-}
-
 .login-toast {
   position: fixed;
   left: 50%;
@@ -3843,11 +3818,6 @@ tbody tr:hover {
 
   .login-card {
     padding: 26px 20px 22px;
-  }
-
-  .login-session {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .topbar {
