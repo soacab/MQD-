@@ -66,11 +66,15 @@ function versionStatusLabel(status: string) {
 function selectPreferredRuleVersion(versions: RuleVersion[], preferredVersionId?: number) {
   return (
     (preferredVersionId ? versions.find((version) => version.id === preferredVersionId) : null) ||
-    versions.find((version) => version.status === "draft") ||
     versions.find((version) => version.is_current) ||
+    versions.find((version) => version.status === "published") ||
     versions[0] ||
     null
   );
+}
+
+function nodePublishedRuleCounts(nodeRows: QGNode[]) {
+  return Object.fromEntries(nodeRows.map((node) => [node.id, node.published_rule_count ?? 0]));
 }
 
 function ruleCategoryLabel(itemType?: string | null) {
@@ -140,6 +144,7 @@ export default function RulesPage() {
   const manualRules = rules.filter((rule) => rule.item_type === "manual" || rule.item_type === "inherit");
   const visibleRules = activeTab === "auto" ? autoRules : manualRules;
   const isDraft = selectedVersion?.status === "draft";
+  const draftVersion = versions.find((version) => version.status === "draft") || null;
 
   const draftChangeDetails =
     selectedVersion?.business_check_rules?.map((rule) => ({
@@ -165,29 +170,20 @@ export default function RulesPage() {
     if (preferred) {
       const detail = await getRuleVersion(preferred.id);
       setSelectedVersion(detail);
-      setNodeRuleCounts((current) => ({
-        ...current,
-        [qgNodeId]: detail.business_check_rules?.length || 0
-      }));
+      if (detail.status === "published" && detail.is_current) {
+        const publishedRuleCount = detail.business_check_rules?.length || 0;
+        setNodeRuleCounts((current) => ({
+          ...current,
+          [qgNodeId]: publishedRuleCount
+        }));
+        setNodes((current) =>
+          current.map((node) => (node.id === qgNodeId ? { ...node, published_rule_count: publishedRuleCount } : node))
+        );
+      }
     } else {
       setSelectedVersion(null);
       setNodeRuleCounts((current) => ({ ...current, [qgNodeId]: 0 }));
     }
-  }
-
-  async function loadNodeRuleCounts(nodeRows: QGNode[]) {
-    const entries = await Promise.all(
-      nodeRows.map(async (node) => {
-        const versionRows = await listRuleVersions(node.id);
-        const preferred = selectPreferredRuleVersion(versionRows.items);
-        if (!preferred) {
-          return [node.id, 0] as const;
-        }
-        const detail = await getRuleVersion(preferred.id);
-        return [node.id, detail.business_check_rules?.length || 0] as const;
-      })
-    );
-    setNodeRuleCounts(Object.fromEntries(entries));
   }
 
   useEffect(() => {
@@ -196,7 +192,7 @@ export default function RulesPage() {
         const [me, nodeRows] = await Promise.all([getCurrentUser(), listQGNodes()]);
         setCurrentUser(me);
         setNodes(nodeRows.items);
-        await loadNodeRuleCounts(nodeRows.items);
+        setNodeRuleCounts(nodePublishedRuleCounts(nodeRows.items));
         const firstNodeId = nodeRows.items[0]?.id ?? null;
         setSelectedNodeId(firstNodeId);
         if (firstNodeId) {
@@ -231,13 +227,22 @@ export default function RulesPage() {
     setSelectedVersion(draft);
     const versionRows = await listRuleVersions(selectedNodeId);
     setVersions(versionRows.items);
-    setNodeRuleCounts((current) => ({
-      ...current,
-      [selectedNodeId]: draft.business_check_rules?.length || 0
-    }));
     const copiedRule = rule ? draft.business_check_rules?.find((item) => item.rule_code === rule.rule_code) : undefined;
     setMessage("已准备可编辑规则版本，保存后发布规则版本才会影响新建任务。");
     return { version: draft, rule: copiedRule };
+  }
+
+  async function continueDraftVersion() {
+    if (!selectedNodeId || !draftVersion) {
+      return;
+    }
+    try {
+      setActiveTab("auto");
+      await loadNode(selectedNodeId, draftVersion.id);
+      setMessage("正在编辑未发布草稿，发布后才会影响新建任务。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "草稿版本加载失败");
+    }
   }
 
   async function openCreateRuleModal() {
@@ -412,6 +417,14 @@ export default function RulesPage() {
                 {selectedVersion ? <span>{selectedVersion.version_no}</span> : null}
               </div>
               <p>{selectedVersionMeta}</p>
+              {canManageRules && draftVersion && selectedVersion?.id !== draftVersion.id ? (
+                <p className="rules-draft-note">
+                  存在未发布草稿 {draftVersion.version_no}
+                  <button type="button" className="link-button" onClick={() => void continueDraftVersion()}>
+                    继续编辑草稿
+                  </button>
+                </p>
+              ) : null}
             </div>
             <button type="button" disabled={!canManageRules} onClick={() => void openCreateRuleModal()}>
               + 新增人工检查项

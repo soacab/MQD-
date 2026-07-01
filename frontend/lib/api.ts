@@ -123,6 +123,7 @@ export type QGNode = {
   id: number;
   node_code: string;
   sort_order: number;
+  published_rule_count?: number;
 };
 
 export type ArchiveProject = {

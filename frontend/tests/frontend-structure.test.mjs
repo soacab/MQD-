@@ -286,10 +286,15 @@ describe("frontend structure", () => {
       "责任方",
       "APQP",
       "状态",
-      "nodeRuleCounts"
+      "nodeRuleCounts",
+      "published_rule_count",
+      "draftVersion",
+      "canManageRules && draftVersion",
+      "继续编辑草稿"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should keep ${snippet}`);
     }
+    assert.doesNotMatch(rulesPage, /loadNodeRuleCounts/, "rules page should not fetch each node detail just to render sidebar counts");
   });
 
   it("keeps task creation as the only user-facing creation entry", () => {

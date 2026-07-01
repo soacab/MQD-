@@ -893,6 +893,42 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(second_data["rule_code"], f"BR-{version_id}-0002")
         self.assertEqual(second_data["sort_order"], 7)
 
+    def test_qg_nodes_expose_published_rule_count_and_ignore_drafts_until_publish(self):
+        nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes.status_code, 200, nodes.text)
+        qg33 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG3.3")
+        qg3 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG3")
+        self.assertEqual(qg33["published_rule_count"], 15)
+        self.assertEqual(qg3["published_rule_count"], 18)
+
+        draft = self.client.post(f"/api/v1/qg-nodes/{qg33['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(draft.status_code, 200, draft.text)
+        draft_id = draft.json()["data"]["id"]
+        created = self.client.post(
+            f"/api/v1/business-rule-versions/{draft_id}/business-check-rules",
+            headers=self.headers,
+            json={
+                "item_name": "Draft-only manual rule",
+                "checklist_requirement": "Draft rule should not affect published count before publish.",
+                "owner_dept": "MQD",
+                "is_apqp": False,
+                "is_active": True,
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        nodes_before_publish = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes_before_publish.status_code, 200, nodes_before_publish.text)
+        qg33_before_publish = next(row for row in nodes_before_publish.json()["data"]["items"] if row["node_code"] == "QG3.3")
+        self.assertEqual(qg33_before_publish["published_rule_count"], 15)
+
+        published = self.client.post(f"/api/v1/business-rule-versions/{draft_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+        nodes_after_publish = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes_after_publish.status_code, 200, nodes_after_publish.text)
+        qg33_after_publish = next(row for row in nodes_after_publish.json()["data"]["items"] if row["node_code"] == "QG3.3")
+        self.assertEqual(qg33_after_publish["published_rule_count"], 16)
+
     def test_publish_rule_version_does_not_require_auto_execution_rules(self):
         _, version_id, _auto_rule_id = self._create_project_and_rules()
 

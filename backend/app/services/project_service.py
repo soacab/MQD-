@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.core.database import execute, query_all, query_one, transaction
-from app.core.enums import InspectionTaskStatus, Permission, ProjectStatus
+from app.core.enums import InspectionTaskStatus, Permission, ProjectStatus, RuleVersionStatus
 from app.core.exceptions import BusinessError
 from app.repositories.common import audit, paginate, row_or_404
 from app.services.permission_service import (
@@ -351,4 +351,22 @@ def delete_project(project_id: int, payload: dict[str, Any], user: dict[str, Any
 
 def list_qg_nodes(user: dict[str, Any]) -> dict[str, Any]:
     require_rule_read_permissions(user)
-    return {"items": query_all("SELECT * FROM qg_nodes ORDER BY sort_order")}
+    nodes = query_all("SELECT * FROM qg_nodes ORDER BY sort_order")
+    for node in nodes:
+        published_version = query_one(
+            """
+            SELECT id FROM business_rule_versions
+            WHERE qg_node_id = ? AND status = ?
+            ORDER BY published_at DESC, id DESC LIMIT 1
+            """,
+            (node["id"], RuleVersionStatus.PUBLISHED),
+        )
+        if not published_version:
+            node["published_rule_count"] = 0
+            continue
+        count = query_one(
+            "SELECT COUNT(*) AS total FROM business_check_rules WHERE business_rule_version_id = ?",
+            (published_version["id"],),
+        )
+        node["published_rule_count"] = count["total"]
+    return {"items": nodes}
