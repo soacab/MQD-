@@ -484,11 +484,14 @@ class AuthPermissionTest(unittest.TestCase):
             f"/api/v1/inspection-tasks/{task_id}",
             f"/api/v1/inspection-tasks/{task_id}/current-round/items",
             f"/api/v1/inspection-items/{item_id}",
-            f"/api/v1/reports/{report_id}",
         ):
             response = self.client.get(path, headers=project_admin_headers)
             self.assertEqual(response.status_code, 400, f"{path}: {response.text}")
             self.assertEqual(response.json()["error"]["code"], "PROJECT_DELETED")
+
+        historical_report = self.client.get(f"/api/v1/reports/{report_id}", headers=project_admin_headers)
+        self.assertEqual(historical_report.status_code, 200, historical_report.text)
+        self.assertEqual(historical_report.json()["data"]["project"]["status"], "deleted")
 
         mark_done = self.client.post(
             f"/api/v1/rectification-items/{rectification_id}/mark-done",
@@ -506,6 +509,35 @@ class AuthPermissionTest(unittest.TestCase):
             response = self.client.get(path, headers=project_admin_headers)
             self.assertEqual(response.status_code, 200, f"{path}: {response.text}")
             self.assertEqual(response.json()["data"]["items"], [])
+
+    def test_deleted_project_cannot_be_deleted_again(self):
+        from app.core.database import query_all, query_one
+
+        project_id = self._create_project("P-delete-once", "DELETE-ONCE")
+        self._create_user("delete_once_admin", ["project_admin"])
+        project_admin_headers = self._login_headers("delete_once_admin")
+        deleted = self.client.request(
+            "DELETE",
+            f"/api/v1/projects/{project_id}",
+            headers=project_admin_headers,
+            json={"confirm_project_name": "P-delete-once", "delete_reason": "first reason"},
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        first_state = query_one("SELECT deleted_by, deleted_at, delete_reason FROM projects WHERE id = ?", (project_id,))
+
+        duplicate = self.client.request(
+            "DELETE",
+            f"/api/v1/projects/{project_id}",
+            headers=project_admin_headers,
+            json={"confirm_project_name": "P-delete-once", "delete_reason": "second reason"},
+        )
+
+        self.assertEqual(duplicate.status_code, 400, duplicate.text)
+        self.assertEqual(duplicate.json()["error"]["code"], "PROJECT_DELETED")
+        second_state = query_one("SELECT deleted_by, deleted_at, delete_reason FROM projects WHERE id = ?", (project_id,))
+        self.assertEqual(second_state, first_state)
+        audit_rows = query_all("SELECT action FROM audit_logs WHERE entity_type = ? AND entity_id = ?", ("project", project_id))
+        self.assertEqual([row["action"] for row in audit_rows].count("delete_project"), 1)
 
     def test_business_permissions_are_independent(self):
         project_user = self._create_user("project_admin_only", ["project_admin"])
@@ -530,6 +562,33 @@ class AuthPermissionTest(unittest.TestCase):
             json={"qg_node_id": 1, "version_no": "P1", "change_summary": "project user cannot edit rules"},
         )
         self.assertEqual(rule.status_code, 403, rule.text)
+
+    def test_project_admin_cannot_prepare_or_create_inspection_task_without_execution_permission(self):
+        self._create_user("task_project_admin_only", ["project_admin"])
+        project_headers = self._login_headers("task_project_admin_only")
+
+        prepare = self.client.post(
+            "/api/v1/inspection-tasks/prepare",
+            headers=project_headers,
+            json={"vdrive_url": "https://vdrive.example.com/?folderGuid=NO-EXECUTION"},
+        )
+        self.assertEqual(prepare.status_code, 403, prepare.text)
+        self.assertEqual(prepare.json()["error"]["code"], "FORBIDDEN")
+
+        create = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=project_headers,
+            json={
+                "vdrive_url": "https://vdrive.example.com/?folderGuid=NO-EXECUTION",
+                "project_name": "No execution permission",
+                "customer": "ACME",
+                "receive_date": "2026-06-30",
+                "models": ["M1"],
+                "qg_node_id": 1,
+            },
+        )
+        self.assertEqual(create.status_code, 403, create.text)
+        self.assertEqual(create.json()["error"]["code"], "FORBIDDEN")
 
     def test_list_users_supports_permission_filter_and_hides_deleted_by_default(self):
         user = self._create_user("delete_me", ["inspection_engineer"])

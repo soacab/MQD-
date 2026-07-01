@@ -194,6 +194,9 @@ export default function ProjectsPage() {
         <p>项目档案由新建点检任务时自动创建或复用；本页仅用于历史基础信息维护、加单和作废。</p>
       </header>
       {message ? <p className="notice">{message}</p> : null}
+      <p className="field-governance-note">
+        字段治理：项目档案按方案 4.3 只做项目详情、机型与加单记录、作废/隐藏维护；普通用户新建入口仍只在点检任务创建流程中。
+      </p>
       <section className="spaced">
         <section className="module">
           <h2>项目列表</h2>

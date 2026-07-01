@@ -334,6 +334,8 @@ def add_project_order(project_id: int, payload: dict[str, Any], user: dict[str, 
 def delete_project(project_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.PROJECT_ADMIN})
     project = row_or_404("SELECT * FROM projects WHERE id = ?", (project_id,), "PROJECT_NOT_FOUND", "项目不存在")
+    if project["status"] != ProjectStatus.NORMAL:
+        raise BusinessError("PROJECT_DELETED", "已删除项目不能重复作废")
     if payload.get("confirm_project_name") != project["project_name"]:
         raise BusinessError("PROJECT_CONFIRM_NAME_MISMATCH", "项目名称确认不匹配")
     execute(

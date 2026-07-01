@@ -26,7 +26,7 @@
 - [x] T03：建立规则域表结构与 SQL helper 访问能力：`qg_nodes`、`business_rule_versions`、`business_check_rules`、`auto_check_execution_rules`、`rule_snapshots`；验收：业务规则、自动执行规则和快照可读写。
 - [x] T04：建立点检域表结构与 SQL helper 访问能力：`inspection_tasks`、`inspection_rounds`、`inspection_items`、`engineer_decisions`、`rectification_items`、`followup_items`；验收：一任务多轮、多检查项和整改复查关系可读写。
 - [x] T05：建立自动检查与 VDrive 快照表结构；验收：自动检查结果、候选文件、扫描批次、文件夹、文件表可迁移，P1 前暂不接真实扫描。
-- [x] T06：建立报告域表结构与 SQL helper 访问能力：`inspection_reports`、`report_items`、`report_corrections`；验收：一个任务一份报告，报告更正表可迁移。
+- [x] T06：建立报告域表结构与 SQL helper 访问能力：`inspection_reports`、`report_items`、`report_corrections`；验收：一个任务一份报告，报告更正表可迁移，并预留 `report_id`、修改前结论、修改后结论和更正原因字段。报告更正业务 API 仍归属 14 模块。
 - [x] T07：创建 Alembic 迁移；验收：全量迁移可在空库执行成功。
 - [x] T08：实现唯一约束和活跃任务部分唯一索引；验收：核心唯一约束和活跃任务部分唯一索引有 unittest 覆盖。
 - [x] T09：添加种子数据脚本；验收：可生成管理员、QG 节点和基础系统设置。

@@ -124,7 +124,9 @@ def require_followup_scope(user: dict[str, Any], followup_id: int) -> dict[str, 
 
 def require_report_scope(user: dict[str, Any], report_id: int) -> dict[str, Any]:
     report = row_or_404("SELECT * FROM inspection_reports WHERE id = ?", (report_id,), "REPORT_NOT_FOUND", "报告不存在")
-    require_task_scope(user, report["inspection_task_id"])
+    task = row_or_404("SELECT * FROM inspection_tasks WHERE id = ?", (report["inspection_task_id"],), "TASK_NOT_FOUND", "点检任务不存在")
+    if not task_in_business_scope(task, user):
+        raise BusinessError("FORBIDDEN", "权限不足", 403)
     return report
 
 

@@ -44,6 +44,9 @@ export default function LoginPage() {
         <p className="eyebrow">认证</p>
         <h1>UID 登录</h1>
       </header>
+      <p className="field-governance-note">
+        字段治理：登录页按方案 4.1 保留 UID、密码和身份进入动作；CheckFlow 不维护或重置公司账号密码。
+      </p>
       <section className="two-column">
         <form className="form-panel" onSubmit={handleLogin}>
           <label>

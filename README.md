@@ -17,13 +17,12 @@ cd MQD-
 git pull
 ```
 
-每次完成一段可说明的修改后提交并推送：
+每次完成一段可说明的修改后提交。只暂存本次小任务相关文件；不要默认推送，除非明确需要同步远端：
 
 ```bash
 git status
-git add .
+git add <相关文件>
 git commit -m "说明这次改了什么"
-git push
 ```
 
 不要把 `.env`、密钥、数据库密码或本地数据库数据提交到 GitHub。需要共享配置格式时，提交 `.env.example`。
@@ -54,7 +53,7 @@ docker compose up -d
 export CHECKFLOW_DATABASE_URL=postgresql://checkflow:checkflow@127.0.0.1:5432/checkflow
 ```
 
-不设置时默认使用 `.env.example` 中的 SQLite 连接，适合本地快速验证。
+不设置时，代码默认使用 `sqlite:///./backend/checkflow.db`，适合本地快速验证。需要自定义配置时，复制 `.env.example` 为 `.env` 后再按本机环境修改；不要提交 `.env`。
 
 ### 安装依赖
 
@@ -68,14 +67,17 @@ cd ..
 ### 启动后端
 
 ```bash
-uv run uvicorn app.main:app --app-dir backend --reload
+PORT=$(codex-port reserve "$PWD" backend)
+uv run uvicorn app.main:app --app-dir backend --reload --port "$PORT"
 ```
 
 ### 启动前端
 
 ```bash
+API_PORT=$(codex-port reserve "$PWD" backend)
+WEB_PORT=$(codex-port reserve "$PWD/frontend" dev)
 cd frontend
-npm run dev
+NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:${API_PORT}" npm run dev -- -p "$WEB_PORT"
 ```
 
 ### 数据库迁移
@@ -87,7 +89,8 @@ uv run alembic upgrade head
 ### 种子数据
 
 ```bash
-PYTHONPATH=backend uv run python -c "from app.core.database import create_schema; from app.seed import seed_database; create_schema(); seed_database()"
+uv run alembic upgrade head
+PYTHONPATH=backend uv run python -c "from app.seed import seed_database; seed_database()"
 ```
 
 ### 测试
@@ -96,9 +99,11 @@ PYTHONPATH=backend uv run python -c "from app.core.database import create_schema
 .venv/bin/python -m unittest discover -s backend/tests -p "test_*.py" -v
 cd frontend
 npm test
+npm run build
 ```
 
 当前默认后端验收使用项目 `.venv` 中的 `unittest`。`uv run pytest` 暂不作为默认测试入口；在修正本机 Python / pytest 环境和依赖配置前，它可能不会加载项目 `.venv` 中的 FastAPI 依赖。
+当前前端未配置 ESLint，`npm run lint` 不是可用验收命令。
 
 ## Docker 化节奏
 

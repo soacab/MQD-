@@ -30,7 +30,7 @@ from app.services.permission_service import (
 
 
 def prepare_inspection_task(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
-    require_permissions(user, {Permission.INSPECTION_ENGINEER, Permission.PROJECT_ADMIN})
+    require_permissions(user, {Permission.INSPECTION_ENGINEER})
     vdrive = project_service.parse_vdrive_url(payload.get("vdrive_url", ""))
     project = project_service.find_project_by_vdrive(vdrive)
     project_payload = project_service.project_detail(project) if project else None
@@ -307,11 +307,41 @@ def task_progress(task_id: int) -> dict[str, int]:
     return {"total": len(items), "confirmed": confirmed, "pending": len(items) - confirmed}
 
 
+def dashboard_auto_check_status(task_id: int, progress: dict[str, int]) -> dict[str, str]:
+    items = query_all("SELECT item_type_snapshot, status FROM inspection_items WHERE inspection_task_id = ?", (task_id,))
+    auto_items = [item for item in items if item["item_type_snapshot"] in (RuleItemType.AUTO, RuleItemType.SYSTEM)]
+    if not auto_items:
+        return {"label": "自动检查未接入", "value": "人工检查项", "tone": "muted"}
+    if progress["total"] > 0 and progress["pending"] == 0:
+        return {"label": "检查项已确认", "value": f"{progress['confirmed']} 项已确认", "tone": "pass"}
+    completed = len([item for item in auto_items if item["status"] == InspectionItemStatus.AUTO_COMPLETED])
+    if completed:
+        return {"label": "自动检查处理中", "value": f"已返回 {completed} 项", "tone": "info"}
+    return {"label": "自动检查处理中", "value": "等待结果", "tone": "pending"}
+
+
+def rectification_progress(task_id: int) -> dict[str, int]:
+    items = query_all("SELECT marked_done_at FROM rectification_items WHERE inspection_task_id = ?", (task_id,))
+    done = len([item for item in items if item["marked_done_at"]])
+    total = len(items)
+    return {"total": total, "done": done, "percent": round((done / total) * 100) if total else 0}
+
+
 def dashboard_task_card(task: dict[str, Any], todo_type: str) -> dict[str, Any]:
-    project = query_one("SELECT project_name FROM projects WHERE id = ?", (task["project_id"],))
+    project = query_one(
+        """
+        SELECT p.project_name, p.mq_user_name_snapshot, u.uid AS mq_user_uid, u.name AS mq_user_name
+        FROM projects p
+        LEFT JOIN users u ON u.id = p.mq_user_id
+        WHERE p.id = ?
+        """,
+        (task["project_id"],),
+    )
     qg_node = query_one("SELECT node_code FROM qg_nodes WHERE id = ?", (task["qg_node_id"],))
     progress = task_progress(task["id"])
-    return {
+    rectification = rectification_progress(task["id"])
+    progress_percent = round((progress["confirmed"] / progress["total"]) * 100) if progress["total"] else 0
+    row = {
         "type": todo_type,
         "target_id": task["id"],
         "task_id": task["id"],
@@ -321,7 +351,45 @@ def dashboard_task_card(task: dict[str, Any], todo_type: str) -> dict[str, Any]:
         "status": task["status"],
         "href": f"/inspection?task_id={task['id']}",
         "summary": f"{progress['confirmed']}/{progress['total']} 项已确认",
+        "round_label": f"第{task['current_round_no'] + 1}轮检查待启动" if todo_type == "recheck_task" else f"第{task['current_round_no']}轮检查",
+        "confirmed_count": progress["confirmed"],
+        "total_count": progress["total"],
+        "progress_percent": progress_percent,
+        "mq_user_name": project["mq_user_name_snapshot"] or project["mq_user_name"] if project else "",
+        "mq_user_uid": project["mq_user_uid"] if project else "",
+        "last_operated_at": task["last_operated_at"],
+        "auto_check_status": dashboard_auto_check_status(task["id"], progress),
     }
+    if todo_type == "recheck_task":
+        row.update(
+            {
+                "rectification_done_count": rectification["done"],
+                "rectification_total_count": rectification["total"],
+                "rectification_progress_percent": rectification["percent"],
+            }
+        )
+    return row
+
+
+def dashboard_task_context(task_id: int) -> dict[str, Any]:
+    return query_one(
+        """
+        SELECT
+            t.current_round_no,
+            t.last_operated_at,
+            p.project_name,
+            p.mq_user_name_snapshot,
+            u.uid AS mq_user_uid,
+            u.name AS mq_user_name,
+            q.node_code AS qg_node
+        FROM inspection_tasks t
+        LEFT JOIN projects p ON p.id = t.project_id
+        LEFT JOIN users u ON u.id = p.mq_user_id
+        LEFT JOIN qg_nodes q ON q.id = t.qg_node_id
+        WHERE t.id = ?
+        """,
+        (task_id,),
+    ) or {}
 
 
 def dashboard_overview(user: dict[str, Any]) -> dict[str, Any]:
@@ -357,33 +425,51 @@ def dashboard_my_todos(user: dict[str, Any]) -> dict[str, Any]:
 
     for item in filter_task_scoped_rows(query_all("SELECT * FROM rectification_items ORDER BY planned_finish_date, id"), user):
         if not item["marked_done_at"]:
+            context = dashboard_task_context(item["inspection_task_id"])
+            progress = rectification_progress(item["inspection_task_id"])
             rows.append(
                 {
                     "type": "rectification_item",
                     "target_id": item["id"],
                     "task_id": item["inspection_task_id"],
                     "project_id": item["project_id"],
+                    "project_name": context.get("project_name", ""),
+                    "qg_node": context.get("qg_node", ""),
                     "title": item["item_name_snapshot"],
                     "status": "pending",
                     "href": f"/rectification?task_id={item['inspection_task_id']}",
                     "summary": f"整改责任人：{item['responsible_owner']}",
                     "planned_finish_date": item["planned_finish_date"],
+                    "round_label": f"第{context.get('current_round_no', 1)}轮检查待启动",
+                    "mq_user_name": context.get("mq_user_name_snapshot") or context.get("mq_user_name", ""),
+                    "mq_user_uid": context.get("mq_user_uid", ""),
+                    "last_operated_at": context.get("last_operated_at"),
+                    "rectification_done_count": progress["done"],
+                    "rectification_total_count": progress["total"],
+                    "rectification_progress_percent": progress["percent"],
                 }
             )
 
     for item in filter_task_scoped_rows(query_all("SELECT * FROM followup_items ORDER BY planned_finish_date, id"), user):
         if not item["closed_at"]:
+            context = dashboard_task_context(item["inspection_task_id"])
             rows.append(
                 {
                     "type": "followup_item",
                     "target_id": item["id"],
                     "task_id": item["inspection_task_id"],
                     "project_id": item["project_id"],
+                    "project_name": context.get("project_name", ""),
+                    "qg_node": context.get("qg_node", ""),
                     "title": item["item_name_snapshot"],
                     "status": "pending",
                     "href": f"/rectification?task_id={item['inspection_task_id']}",
                     "summary": f"待跟进责任人：{item['responsible_owner']}",
                     "planned_finish_date": item["planned_finish_date"],
+                    "round_label": f"第{context.get('current_round_no', 1)}轮检查",
+                    "mq_user_name": context.get("mq_user_name_snapshot") or context.get("mq_user_name", ""),
+                    "mq_user_uid": context.get("mq_user_uid", ""),
+                    "last_operated_at": context.get("last_operated_at"),
                 }
             )
 
@@ -417,6 +503,8 @@ def confirm_item(item_id: int, payload: dict[str, Any], user: dict[str, Any]) ->
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
     item = require_item_scope(user, item_id)
     ensure_item_mutable(item)
+    if item["status"] not in (InspectionItemStatus.MANUAL_REQUIRED, InspectionItemStatus.AUTO_COMPLETED):
+        raise BusinessError("ITEM_NOT_CONFIRMABLE", "当前检查项状态不能确认")
     result = payload.get("decision_result")
     if result not in (InspectionResult.PASS, InspectionResult.FAIL, InspectionResult.CONDITIONAL, InspectionResult.NA):
         raise BusinessError("INVALID_DECISION_RESULT", "结论必须是 pass、fail、conditional 或 na")
@@ -555,6 +643,8 @@ def generate_work_items(task: dict[str, Any], round_row: dict[str, Any], items: 
 def void_task(task_id: int, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
     task = require_task_scope(user, task_id)
+    if not str(payload.get("void_reason") or "").strip():
+        raise BusinessError("VOID_REASON_REQUIRED", "作废原因必填")
     if task["status"] not in (InspectionTaskStatus.RUNNING, InspectionTaskStatus.RECTIFYING):
         raise BusinessError("TASK_CANNOT_BE_VOIDED", "当前状态不能作废")
     execute(
@@ -593,10 +683,12 @@ def undo_rectification_done(rectification_id: int, user: dict[str, Any]) -> dict
     task = query_one("SELECT * FROM inspection_tasks WHERE id = ?", (item["inspection_task_id"],))
     if task["status"] != InspectionTaskStatus.RECTIFYING:
         raise BusinessError("RECTIFICATION_UNDO_FORBIDDEN", "复查触发后不能撤销整改完成")
-    execute(
-        "UPDATE rectification_items SET marked_done_by = NULL, marked_done_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (rectification_id,),
-    )
+    with transaction():
+        execute(
+            "UPDATE rectification_items SET marked_done_by = NULL, marked_done_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (rectification_id,),
+        )
+        audit("undo_rectification_done", "rectification_item", rectification_id, user["id"])
     return query_one("SELECT * FROM rectification_items WHERE id = ?", (rectification_id,))
 
 
@@ -611,7 +703,9 @@ def list_followups(task_id: int | None, user: dict[str, Any]) -> dict[str, Any]:
 def close_followup(followup_id: int, user: dict[str, Any]) -> dict[str, Any]:
     require_permissions(user, {Permission.INSPECTION_ENGINEER})
     require_followup_scope(user, followup_id)
-    execute("UPDATE followup_items SET closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"], followup_id))
+    with transaction():
+        execute("UPDATE followup_items SET closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"], followup_id))
+        audit("close_followup", "followup_item", followup_id, user["id"])
     return query_one("SELECT * FROM followup_items WHERE id = ?", (followup_id,))
 
 

@@ -111,6 +111,9 @@ export default function RectificationPage() {
         <h1>整改与复查</h1>
       </header>
       {message ? <p className="notice">{message}</p> : null}
+      <p className="field-governance-note">
+        字段治理：整改复查页按方案 4.6 展示不满足项、标记完成、撤销和触发复查；带条件满足项落实入口保留在工作台语义中。
+      </p>
       <section className="two-column">
         <form className="form-panel" onSubmit={handleSearch}>
           <h2>整改项</h2>

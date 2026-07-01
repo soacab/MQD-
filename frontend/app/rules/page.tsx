@@ -343,6 +343,9 @@ export default function RulesPage() {
 
       {message ? <p className="notice">{message}</p> : null}
       {!canManageRules ? <p className="notice">只读模式：规则管理员可编辑，当前用户只能查看规则配置和版本历史。</p> : null}
+      <p className="field-governance-note">
+        字段治理：规则配置按方案 4.8 展示检查项名称、检查类型、Checklist 要求、责任方、APQP、状态和版本历史；接口中的执行配置只作为规则详情来源，不扩展成未确认 UI 字段。
+      </p>
 
       <section className="rules-board">
         <aside className="rules-node-nav" aria-label="检查阶段">

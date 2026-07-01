@@ -3,6 +3,10 @@ import type { LoginResult, User } from "@/lib/api";
 const TOKEN_KEY = "checkflow_access_token";
 const USER_KEY = "checkflow_current_user";
 
+function notifySessionChanged(): void {
+  window.dispatchEvent(new CustomEvent("checkflow:session-changed"));
+}
+
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") {
     return null;
@@ -31,6 +35,7 @@ export function saveSession(result: LoginResult): void {
   }
   window.localStorage.setItem(TOKEN_KEY, result.access_token);
   window.localStorage.setItem(USER_KEY, JSON.stringify(result.user));
+  notifySessionChanged();
 }
 
 export function updateStoredUser(user: User): void {
@@ -38,6 +43,7 @@ export function updateStoredUser(user: User): void {
     return;
   }
   window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+  notifySessionChanged();
 }
 
 export function clearSession(): void {
@@ -46,4 +52,5 @@ export function clearSession(): void {
   }
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+  notifySessionChanged();
 }

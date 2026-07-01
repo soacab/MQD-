@@ -159,7 +159,7 @@ normal
 
 ```
 1. Project.status = normal。
-2. 当前用户具备 project_admin 或 super_admin 权限。
+2. 当前用户具备 project_admin 权限。
 3. 用户完成二次确认。
 4. 若前端要求输入项目名称，则输入内容必须与项目名称一致。
 ```
@@ -409,7 +409,7 @@ NO-GO 后，责任人完成整改，点检工程师发起复查。
 
 ```
 1. InspectionTask.status in ('running', 'rectifying')。
-2. 当前用户具备 inspection_engineer 或 super_admin 权限。
+2. 当前用户具备 inspection_engineer 权限。
 3. 用户填写作废原因。
 ```
 
@@ -1157,7 +1157,7 @@ closed_at
 
 ```
 1. FollowUpItem.closed_at 为空。
-2. 当前用户具备 inspection_engineer 或 super_admin 权限。
+2. 当前用户具备 inspection_engineer 权限。
 ```
 
 ### 系统动作
@@ -1285,7 +1285,7 @@ CreateInspectionTask
 ```
 1. inspection_reports 已存在。
 2. report_items 已存在。
-3. 当前用户具备 inspection_engineer 或 super_admin 权限。
+3. 当前用户具备 inspection_engineer 权限。
 4. 用户填写 correction_reason。
 ```
 
@@ -1388,21 +1388,23 @@ CorrectReportItem
 
 | 事件 | 建议权限 |
 | --- | --- |
-| CreateInspectionTask | inspection_engineer / super_admin |
-| StartAutoCheck | inspection_engineer / super_admin |
-| SelectCandidateFile | inspection_engineer / super_admin |
-| ConvertToManual | inspection_engineer / super_admin |
-| ConfirmInspectionItem | inspection_engineer / super_admin |
-| ArchiveCurrentRound | inspection_engineer / super_admin |
-| MarkRectificationDone | inspection_engineer / super_admin |
-| ReopenRectificationItem | inspection_engineer / super_admin |
-| TriggerRecheck | inspection_engineer / super_admin |
-| CloseFollowUpItem | inspection_engineer / super_admin |
-| CorrectReportItem | inspection_engineer / super_admin |
-| VoidInspectionTask | inspection_engineer / super_admin |
-| DeleteProject | project_admin / super_admin |
-| PublishBusinessRuleVersion | rules_admin / super_admin |
-| UpdateAutoCheckExecutionRule | rules_admin / super_admin |
+| CreateInspectionTask | inspection_engineer |
+| StartAutoCheck | inspection_engineer |
+| SelectCandidateFile | inspection_engineer |
+| ConvertToManual | inspection_engineer |
+| ConfirmInspectionItem | inspection_engineer |
+| ArchiveCurrentRound | inspection_engineer |
+| MarkRectificationDone | inspection_engineer |
+| ReopenRectificationItem | inspection_engineer |
+| TriggerRecheck | inspection_engineer |
+| CloseFollowUpItem | inspection_engineer |
+| CorrectReportItem | inspection_engineer |
+| VoidInspectionTask | inspection_engineer |
+| DeleteProject | project_admin |
+| PublishBusinessRuleVersion | rules_admin |
+| UpdateAutoCheckExecutionRule | rules_admin |
+
+`super_admin` 只表示账号与权限管理能力，不默认获得业务操作权限。需要业务操作时，账号必须显式叠加 `inspection_engineer`、`project_admin` 或 `rules_admin`。
 
 ---
 

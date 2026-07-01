@@ -498,8 +498,11 @@ CREATE TABLE IF NOT EXISTS report_items (
 
 CREATE TABLE IF NOT EXISTS report_corrections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER NOT NULL REFERENCES inspection_reports(id),
     report_item_id INTEGER NOT NULL REFERENCES report_items(id),
-    correction_text TEXT NOT NULL,
+    before_result TEXT,
+    after_result TEXT NOT NULL,
+    correction_reason TEXT NOT NULL,
     corrected_by INTEGER REFERENCES users(id),
     corrected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

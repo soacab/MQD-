@@ -289,6 +289,21 @@ export type DashboardTodo = {
   href: string;
   summary?: string;
   planned_finish_date?: string;
+  round_label?: string;
+  confirmed_count?: number;
+  total_count?: number;
+  progress_percent?: number;
+  rectification_done_count?: number;
+  rectification_total_count?: number;
+  rectification_progress_percent?: number;
+  mq_user_name?: string;
+  mq_user_uid?: string;
+  last_operated_at?: string;
+  auto_check_status?: {
+    label: string;
+    value: string;
+    tone: string;
+  };
 };
 
 export type ListResult<T> = {

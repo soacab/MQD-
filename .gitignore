@@ -4,5 +4,8 @@ __pycache__/
 .venv/
 node_modules/
 .next/
+.env
+.env.*
+!.env.example
 checkflow.db
 backend/checkflow.db

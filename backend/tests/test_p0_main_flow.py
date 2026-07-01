@@ -174,6 +174,15 @@ class P0MainFlowTest(unittest.TestCase):
         )
         self.assertEqual(rectifications.status_code, 200, rectifications.text)
         rectification_id = rectifications.json()["data"]["items"][0]["id"]
+        dashboard = self.client.get("/api/v1/dashboard/my-todos", headers=self.headers)
+        self.assertEqual(dashboard.status_code, 200, dashboard.text)
+        rectification_todo = next(row for row in dashboard.json()["data"]["items"] if row["type"] == "recheck_task")
+        self.assertEqual(rectification_todo["project_name"], "MQD P0 Project")
+        self.assertEqual(rectification_todo["qg_node"], "QG2")
+        self.assertEqual(rectification_todo["round_label"], "第2轮检查待启动")
+        self.assertEqual(rectification_todo["rectification_done_count"], 0)
+        self.assertEqual(rectification_todo["rectification_total_count"], 1)
+        self.assertEqual(rectification_todo["rectification_progress_percent"], 0)
         done = self.client.post(
             f"/api/v1/rectification-items/{rectification_id}/mark-done",
             headers=self.headers,
@@ -225,7 +234,174 @@ class P0MainFlowTest(unittest.TestCase):
         todos = self.client.get("/api/v1/dashboard/my-todos", headers=self.headers)
         self.assertEqual(todos.status_code, 200, todos.text)
         todo_rows = todos.json()["data"]["items"]
-        self.assertTrue(any(row["type"] == "running_task" and row["target_id"] == task_id for row in todo_rows))
+        task_row = next(row for row in todo_rows if row["type"] == "running_task" and row["target_id"] == task_id)
+        self.assertEqual(task_row["task_id"], task_id)
+        self.assertEqual(task_row["project_id"], project_id)
+        self.assertEqual(task_row["qg_node"], "QG2")
+        self.assertEqual(task_row["round_label"], "第1轮检查")
+        self.assertEqual(task_row["confirmed_count"], 0)
+        self.assertEqual(task_row["total_count"], 2)
+        self.assertEqual(task_row["progress_percent"], 0)
+        self.assertEqual(task_row["mq_user_name"], "系统管理员")
+        self.assertEqual(task_row["mq_user_uid"], "admin")
+        self.assertIn("last_operated_at", task_row)
+        self.assertEqual(task_row["auto_check_status"]["label"], "自动检查处理中")
+
+    def test_confirmed_item_cannot_be_confirmed_again(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "DUPLICATE_CONFIRM_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+        )
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+        task_id = task.json()["data"]["inspection_task_id"]
+        items = self.client.get(f"/api/v1/inspection-tasks/{task_id}/current-round/items", headers=self.headers)
+        self.assertEqual(items.status_code, 200, items.text)
+        item_id = items.json()["data"]["items"][0]["id"]
+
+        first_confirm = self.client.post(
+            f"/api/v1/inspection-items/{item_id}/confirm",
+            headers=self.headers,
+            json={"decision_result": "pass", "decision_text": "First decision."},
+        )
+        self.assertEqual(first_confirm.status_code, 200, first_confirm.text)
+        second_confirm = self.client.post(
+            f"/api/v1/inspection-items/{item_id}/confirm",
+            headers=self.headers,
+            json={"decision_result": "fail", "decision_text": "Second decision.", "responsible_owner": "MQD", "planned_finish_date": "2026-07-15"},
+        )
+
+        self.assertEqual(second_confirm.status_code, 400, second_confirm.text)
+        self.assertEqual(second_confirm.json()["error"]["code"], "ITEM_NOT_CONFIRMABLE")
+
+    def test_void_task_requires_reason(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "VOID_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+        )
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+        task_id = task.json()["data"]["inspection_task_id"]
+
+        voided = self.client.post(f"/api/v1/inspection-tasks/{task_id}/void", headers=self.headers, json={})
+
+        self.assertEqual(voided.status_code, 400, voided.text)
+        self.assertEqual(voided.json()["error"]["code"], "VOID_REASON_REQUIRED")
+
+    def test_undo_rectification_and_close_followup_write_audit_logs(self):
+        from app.core.database import query_all
+
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_code": "AUDIT_FILE_EXISTS",
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "config_version": "V1",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+        )
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+        task_id = task.json()["data"]["inspection_task_id"]
+        items = self.client.get(f"/api/v1/inspection-tasks/{task_id}/current-round/items", headers=self.headers)
+        self.assertEqual(items.status_code, 200, items.text)
+        item_rows = items.json()["data"]["items"]
+        fail_confirm = self.client.post(
+            f"/api/v1/inspection-items/{item_rows[0]['id']}/confirm",
+            headers=self.headers,
+            json={
+                "decision_result": "fail",
+                "decision_text": "Needs rectification.",
+                "responsible_owner": "MQD",
+                "planned_finish_date": "2026-07-15",
+            },
+        )
+        self.assertEqual(fail_confirm.status_code, 200, fail_confirm.text)
+        conditional_confirm = self.client.post(
+            f"/api/v1/inspection-items/{item_rows[1]['id']}/confirm",
+            headers=self.headers,
+            json={
+                "decision_result": "conditional",
+                "decision_text": "Can proceed with follow-up.",
+                "countermeasure": "Track action.",
+                "responsible_owner": "MQD",
+                "planned_finish_date": "2026-07-20",
+            },
+        )
+        self.assertEqual(conditional_confirm.status_code, 200, conditional_confirm.text)
+        archived = self.client.post(f"/api/v1/inspection-tasks/{task_id}/archive-current-round", headers=self.headers)
+        self.assertEqual(archived.status_code, 200, archived.text)
+        rectifications = self.client.get(f"/api/v1/rectification-items?task_id={task_id}", headers=self.headers)
+        self.assertEqual(rectifications.status_code, 200, rectifications.text)
+        followups = self.client.get(f"/api/v1/followup-items?task_id={task_id}", headers=self.headers)
+        self.assertEqual(followups.status_code, 200, followups.text)
+        rectification_id = rectifications.json()["data"]["items"][0]["id"]
+        followup_id = followups.json()["data"]["items"][0]["id"]
+
+        marked = self.client.post(f"/api/v1/rectification-items/{rectification_id}/mark-done", headers=self.headers)
+        self.assertEqual(marked.status_code, 200, marked.text)
+        undone = self.client.post(f"/api/v1/rectification-items/{rectification_id}/undo-done", headers=self.headers)
+        self.assertEqual(undone.status_code, 200, undone.text)
+        closed = self.client.post(f"/api/v1/followup-items/{followup_id}/close", headers=self.headers)
+        self.assertEqual(closed.status_code, 200, closed.text)
+
+        audit_rows = query_all(
+            "SELECT action FROM audit_logs WHERE action IN (?, ?) ORDER BY action",
+            ("close_followup", "undo_rectification_done"),
+        )
+        self.assertEqual([row["action"] for row in audit_rows], ["close_followup", "undo_rectification_done"])
 
     def test_project_listing_filters_deleted_models_qg_and_updates_project(self):
         project_id, version_id, auto_rule_id = self._create_project_and_rules()

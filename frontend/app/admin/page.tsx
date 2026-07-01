@@ -236,6 +236,9 @@ export default function AdminPage() {
       </header>
       {message ? <p className="notice">{message}</p> : null}
       {!canManageAccounts ? <p className="notice">只读模式：仅权限管理员可编辑用户、权限和系统设置。</p> : null}
+      <p className="field-governance-note">
+        字段治理：后台仅展示方案 4.1 和原型确认的 UID、姓名、公司邮箱、用户权限、状态与自动检查开关；权限管理不默认获得点检、规则或项目管理能力。
+      </p>
 
       <section className="admin-layout">
         <nav className="admin-nav" aria-label="后台分区">

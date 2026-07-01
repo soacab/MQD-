@@ -13,16 +13,19 @@
 
 ## 构建、测试与本地开发命令
 
-当前尚未包含包管理器、构建脚本或测试运行器。可使用以下安全检查命令：
+当前已包含后端 `pyproject.toml` / `uv.lock`、前端 `frontend/package.json` / `package-lock.json`，以及后端 unittest、前端结构测试和前端构建命令。常用检查命令：
 
 - `rg "关键词" .`：快速检索全部设计文档。
 - `open -a "Microsoft Edge" CheckFlow_原型.html`：用 Edge 打开静态原型。
+- `.venv/bin/python -m unittest discover -s backend/tests -p "test_*.py" -v`：运行后端默认测试。
+- `cd frontend && npm test`：运行前端结构测试。
+- `cd frontend && npm run build`：运行前端生产构建。
 
 项目初始化阶段优先使用 Docker Compose 提供 PostgreSQL；前后端默认在本机直接运行，不要求一开始整体容器化。
 
 完整跨笔记本开发流程、本地启动策略和 Docker 化节奏以 `README.md` 为准；不要在本文件重复维护完整教程。
 
-代码脚手架加入后，应在本节补充真实命令，例如 `uv run pytest`、`npm test`、`npm run lint`，以及前后端本地启动命令。
+当前前端未配置 ESLint，`npm run lint` 不是可用验收命令。完整启动命令、端口登记和数据库初始化流程以 `README.md` 为准。
 
 ## 编码风格与命名约定
 
@@ -30,7 +33,7 @@
 
 ## 测试指南
 
-本仓库目前没有可执行测试。文档变更应人工校验链接、标题层级、术语一致性和相关设计文件是否同步。后端实现后，测试放在 `backend/tests/`，文件命名为 `test_*.py`。前端实现后，在组件旁或专用测试目录添加组件/流程测试，并把运行命令记录到本文件。
+本仓库已有可执行测试。后端测试放在 `backend/tests/`，文件命名为 `test_*.py`；默认用 `.venv/bin/python -m unittest discover -s backend/tests -p "test_*.py" -v` 运行。前端当前使用 `frontend/tests/frontend-structure.test.mjs`，默认用 `cd frontend && npm test` 运行；生产构建用 `cd frontend && npm run build` 验证。文档变更仍需人工校验链接、标题层级、术语一致性和相关设计文件是否同步。
 
 ## 提交与 Pull Request 规范
 
@@ -45,7 +48,7 @@
 - 优先运行和本次改动最相关的测试或检查。
 - 如果项目已有默认测试命令，以 `README.md` 或本文件记录的命令为准。
 - 当前尚无测试脚本时，文档变更至少运行 `git diff --check`，并人工核对相关 Markdown 内容。
-- 后端/前端脚手架建立后，再补充真实默认命令，例如 `uv run pytest`、`npm test`、`npm run lint`。
+- 当前前端未配置 ESLint，不要把 `npm run lint` 当作默认验收命令。
 
 提交规则：
 

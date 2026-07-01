@@ -134,15 +134,17 @@ super_admin            超级管理员
 
 | 操作类型 | 需要权限 |
 | --- | --- |
-| 创建点检任务 | inspection_engineer / super_admin |
-| 自动检查 | inspection_engineer / super_admin |
-| 工程师确认 | inspection_engineer / super_admin |
-| 归档轮次 | inspection_engineer / super_admin |
-| 整改 / 复查 | inspection_engineer / super_admin |
-| 报告更正 | inspection_engineer / super_admin |
-| 项目删除 | project_admin / super_admin |
-| 规则配置 | rules_admin / super_admin |
+| 创建点检任务 | inspection_engineer |
+| 自动检查 | inspection_engineer |
+| 工程师确认 | inspection_engineer |
+| 归档轮次 | inspection_engineer |
+| 整改 / 复查 | inspection_engineer |
+| 报告更正 | inspection_engineer |
+| 项目删除 | project_admin |
+| 规则配置 | rules_admin |
 | 用户权限配置 | super_admin |
+
+`super_admin` 仅代表账号和权限管理能力，不默认拥有业务数据范围或业务操作权限；如需执行业务操作，账号必须显式叠加对应业务权限。
 
 ---
 
@@ -485,7 +487,7 @@ POST /api/v1/projects/{project_id}/vdrive-link
 
 ```
 1. Project.status = normal。
-2. 用户具备 project_admin 或 super_admin 权限。
+2. 用户具备 project_admin 权限。
 3. 新链接可解析 folderGuid。
 4. 可通过 VDrive 接口获取 folderId。
 ```
@@ -807,7 +809,7 @@ PublishBusinessRuleVersion
 
 ```
 1. business_rule_versions.status = draft。
-2. 当前用户具备 rules_admin 或 super_admin 权限。
+2. 当前用户具备 rules_admin 权限。
 3. 自动检查项必须配置可用的 auto_check_execution_rules。
 4. 人工检查项不需要 auto_check_execution_rules。
 5. 继承项不需要 auto_check_execution_rules。

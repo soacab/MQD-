@@ -254,6 +254,9 @@ export default function ReportsPage() {
 
   return (
     <main className="page archive-shell">
+      <p className="field-governance-note">
+        字段治理：检查档案列表字段按方案 4.7 与原型对齐；接口中的内部 ID、规则快照 JSON 和未完成更正能力不作为正式展示字段。
+      </p>
       <form className="archive-toolbar" onSubmit={handleSearch}>
         <input
           aria-label="项目名称或机型"
