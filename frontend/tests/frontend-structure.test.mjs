@@ -271,6 +271,7 @@ describe("frontend structure", () => {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
     assert.doesNotMatch(rulesPage, /只读模式/, "rules page should not expose readonly-mode copy");
+    assert.doesNotMatch(rulesPage, /当前用户只能查看规则配置和版本历史/, "rules page should not expose permission notice copy");
 
     for (const snippet of [
       "historyVersions",

@@ -435,7 +435,6 @@ export default function RulesPage() {
   return (
     <main className="page rules-workspace">
       {message ? <p className="notice">{message}</p> : null}
-      {!canManageRules ? <p className="notice">当前用户只能查看规则配置和版本历史，编辑需规则管理员权限。</p> : null}
 
       <section className="rules-board">
         <aside className="rules-node-nav" aria-label="检查阶段">
