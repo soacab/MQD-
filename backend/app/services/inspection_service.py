@@ -57,9 +57,14 @@ def ensure_wizard_payload(payload: dict[str, Any]) -> list[str]:
 def upsert_project_from_task_wizard(payload: dict[str, Any], user: dict[str, Any]) -> int:
     models = ensure_wizard_payload(payload)
     vdrive = project_service.parse_vdrive_url(payload.get("vdrive_url", ""))
-    mq_user = query_one("SELECT name FROM users WHERE id = ?", (payload.get("mq_user_id"),))
     project = project_service.find_project_by_vdrive(vdrive)
     if project:
+        mq_user_id = payload["mq_user_id"] if "mq_user_id" in payload else project["mq_user_id"]
+        if "mq_user_id" in payload:
+            mq_user = query_one("SELECT name FROM users WHERE id = ?", (mq_user_id,))
+            mq_user_name_snapshot = mq_user["name"] if mq_user else None
+        else:
+            mq_user_name_snapshot = project["mq_user_name_snapshot"]
         execute(
             """
             UPDATE projects SET project_name = ?, customer = ?, project_category = ?, bu = ?,
@@ -71,15 +76,15 @@ def upsert_project_from_task_wizard(payload: dict[str, Any], user: dict[str, Any
             (
                 payload["project_name"],
                 payload["customer"],
-                payload.get("project_category"),
-                payload.get("bu"),
-                payload.get("project_level"),
-                payload.get("mq_user_id"),
-                mq_user["name"] if mq_user else None,
-                payload.get("mp_owner"),
-                payload.get("group_name"),
-                payload.get("planned_mp_date"),
-                payload.get("production_line"),
+                payload["project_category"] if "project_category" in payload else project["project_category"],
+                payload["bu"] if "bu" in payload else project["bu"],
+                payload["project_level"] if "project_level" in payload else project["project_level"],
+                mq_user_id,
+                mq_user_name_snapshot,
+                payload["mp_owner"] if "mp_owner" in payload else project["mp_owner"],
+                payload["group_name"] if "group_name" in payload else project["group_name"],
+                payload["planned_mp_date"] if "planned_mp_date" in payload else project["planned_mp_date"],
+                payload["production_line"] if "production_line" in payload else project["production_line"],
                 payload.get("vdrive_url"),
                 vdrive["folder_guid"],
                 vdrive["folder_id"],
@@ -93,6 +98,7 @@ def upsert_project_from_task_wizard(payload: dict[str, Any], user: dict[str, Any
         audit("upsert_project_from_task_wizard", "project", project["id"], user["id"], payload)
         return project["id"]
 
+    mq_user = query_one("SELECT name FROM users WHERE id = ?", (payload.get("mq_user_id"),))
     cur = execute(
         """
         INSERT INTO projects(

@@ -321,6 +321,49 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(voided.status_code, 400, voided.text)
         self.assertEqual(voided.json()["error"]["code"], "VOID_REASON_REQUIRED")
 
+    def test_inspection_request_schemas_reject_extra_fields_and_invalid_decisions(self):
+        project_id, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "is_enabled": True,
+                "config_json": {"mock": True},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(
+            f"/api/v1/business-rule-versions/{version_id}/publish",
+            headers=self.headers,
+        )
+        self.assertEqual(published.status_code, 200, published.text)
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={"project_id": project_id, "qg_node_id": 1},
+        )
+        self.assertEqual(task.status_code, 200, task.text)
+        task_id = task.json()["data"]["inspection_task_id"]
+        items = self.client.get(f"/api/v1/inspection-tasks/{task_id}/current-round/items", headers=self.headers)
+        self.assertEqual(items.status_code, 200, items.text)
+        item_id = items.json()["data"]["items"][0]["id"]
+
+        invalid_decision = self.client.post(
+            f"/api/v1/inspection-items/{item_id}/confirm",
+            headers=self.headers,
+            json={"decision_result": "maybe", "decision_text": "Invalid decision."},
+        )
+        self.assertEqual(invalid_decision.status_code, 422, invalid_decision.text)
+
+        extra_field = self.client.post(
+            f"/api/v1/inspection-tasks/{task_id}/void",
+            headers=self.headers,
+            json={"void_reason": "no longer needed", "unexpected_field": "typo"},
+        )
+        self.assertEqual(extra_field.status_code, 422, extra_field.text)
+
     def test_undo_rectification_and_close_followup_write_audit_logs(self):
         from app.core.database import query_all
 
@@ -479,6 +522,53 @@ class P0MainFlowTest(unittest.TestCase):
         deleted_list = self.client.get("/api/v1/projects?status=deleted", headers=self.headers)
         self.assertEqual(deleted_list.status_code, 200, deleted_list.text)
         self.assertEqual([row["id"] for row in deleted_list.json()["data"]["items"]], [other_project_id])
+
+    def test_project_request_schemas_reject_extra_fields_and_keep_business_errors(self):
+        missing_required = self.client.post(
+            "/api/v1/projects",
+            headers=self.headers,
+            json={"customer": "Customer A"},
+        )
+        self.assertEqual(missing_required.status_code, 400, missing_required.text)
+        self.assertEqual(missing_required.json()["error"]["code"], "PROJECT_REQUIRED_FIELD")
+
+        extra_field = self.client.post(
+            "/api/v1/projects",
+            headers=self.headers,
+            json={
+                "project_name": "Extra Field Project",
+                "customer": "Customer A",
+                "vdrive_url": "https://vdrive.example/indrive#/index?folderGuid=extra-field",
+                "receive_date": "2026-07-01",
+                "models": ["M1"],
+                "unexpected_field": "typo",
+            },
+        )
+        self.assertEqual(extra_field.status_code, 422, extra_field.text)
+
+        project_id, _, _ = self._create_project_and_rules()
+        invalid_vdrive_update = self.client.post(
+            f"/api/v1/projects/{project_id}/vdrive-link",
+            headers=self.headers,
+            json={},
+        )
+        self.assertEqual(invalid_vdrive_update.status_code, 422, invalid_vdrive_update.text)
+
+    def test_project_patch_schema_only_updates_submitted_fields(self):
+        project_id, _, _ = self._create_project_and_rules()
+
+        edited = self.client.patch(
+            f"/api/v1/projects/{project_id}",
+            headers=self.headers,
+            json={"customer": "Customer Only Edited"},
+        )
+
+        self.assertEqual(edited.status_code, 200, edited.text)
+        edited_data = edited.json()["data"]
+        self.assertEqual(edited_data["customer"], "Customer Only Edited")
+        self.assertEqual(edited_data["project_name"], "MQD P0 Project")
+        self.assertEqual(edited_data["bu"], "BU1")
+        self.assertEqual(edited_data["production_line"], "Line 1")
 
     def test_add_order_is_blocked_when_project_has_active_task(self):
         project_id, version_id, auto_rule_id = self._create_project_and_rules()
@@ -714,6 +804,37 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(project_data["project_name"], "VDrive-WIZARD-FOLDER")
         self.assertEqual(project_data["vdrive"]["folder_guid"], "WIZARD-FOLDER")
         self.assertEqual([model["model_name"] for model in project_data["models"]], ["W1"])
+
+    def test_create_inspection_task_from_wizard_preserves_existing_project_optional_fields(self):
+        project_id, version_id, _ = self._create_project_and_rules()
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+
+        task = self.client.post(
+            "/api/v1/inspection-tasks",
+            headers=self.headers,
+            json={
+                "vdrive_url": "https://vdrive.example/indrive#/index?id=enterprise_folder-001",
+                "project_name": "MQD P0 Project",
+                "customer": "Customer A",
+                "receive_date": "2026-07-12",
+                "models": ["M3"],
+                "qg_node_id": 1,
+            },
+        )
+
+        self.assertEqual(task.status_code, 200, task.text)
+        project = self.client.get(f"/api/v1/projects/{project_id}", headers=self.headers)
+        self.assertEqual(project.status_code, 200, project.text)
+        project_data = project.json()["data"]
+        self.assertEqual(project_data["project_category"], "new_project")
+        self.assertEqual(project_data["bu"], "BU1")
+        self.assertEqual(project_data["project_level"], "A")
+        self.assertEqual(project_data["mq_user_id"], 1)
+        self.assertEqual(project_data["mp_owner"], "PM")
+        self.assertEqual(project_data["group_name"], "MQD")
+        self.assertEqual(project_data["planned_mp_date"], "2026-10-01")
+        self.assertEqual(project_data["production_line"], "Line 1")
 
     def test_create_inspection_task_from_wizard_rolls_back_project_when_later_step_fails(self):
         from app.core.database import query_all

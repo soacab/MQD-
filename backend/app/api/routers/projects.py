@@ -1,17 +1,27 @@
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Depends
 
 from app.api.deps import current_user
 from app.api.responses import ok
+from app.api.schemas.common import request_dict
+from app.api.schemas.projects import (
+    AddProjectOrderRequest,
+    CreateProjectRequest,
+    DeleteProjectRequest,
+    UpdateProjectRequest,
+    UpdateProjectVDriveRequest,
+    ValidateVDriveLinkRequest,
+)
 from app.services import project_service
 
 router = APIRouter()
 
 
 @router.post("/api/v1/vdrive/validate-folder-link")
-def validate_vdrive_link(payload: dict = Body(...), _: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(project_service.parse_vdrive_url(payload.get("vdrive_url", "")))
+def validate_vdrive_link(payload: ValidateVDriveLinkRequest, _: dict = Depends(current_user)) -> dict[str, Any]:
+    data = request_dict(payload)
+    return ok(project_service.parse_vdrive_url(data.get("vdrive_url", "")))
 
 
 @router.get("/api/v1/projects")
@@ -48,28 +58,28 @@ def get_project(project_id: int, user: dict = Depends(current_user)) -> dict[str
 
 
 @router.post("/api/v1/projects")
-def create_project(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(project_service.create_project(payload, user))
+def create_project(payload: CreateProjectRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(project_service.create_project(request_dict(payload), user))
 
 
 @router.patch("/api/v1/projects/{project_id}")
-def update_project(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(project_service.update_project(project_id, payload, user))
+def update_project(project_id: int, payload: UpdateProjectRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(project_service.update_project(project_id, request_dict(payload), user))
 
 
 @router.post("/api/v1/projects/{project_id}/vdrive-link")
-def update_project_vdrive(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(project_service.update_project_vdrive(project_id, payload, user))
+def update_project_vdrive(project_id: int, payload: UpdateProjectVDriveRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(project_service.update_project_vdrive(project_id, request_dict(payload), user))
 
 
 @router.post("/api/v1/projects/{project_id}/orders")
-def add_project_order(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(project_service.add_project_order(project_id, payload, user))
+def add_project_order(project_id: int, payload: AddProjectOrderRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(project_service.add_project_order(project_id, request_dict(payload), user))
 
 
 @router.delete("/api/v1/projects/{project_id}")
-def delete_project(project_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(project_service.delete_project(project_id, payload, user))
+def delete_project(project_id: int, payload: DeleteProjectRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(project_service.delete_project(project_id, request_dict(payload), user))
 
 
 @router.get("/api/v1/qg-nodes")

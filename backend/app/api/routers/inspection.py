@@ -1,22 +1,30 @@
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Depends
 
 from app.api.deps import current_user
 from app.api.responses import ok
+from app.api.schemas.common import request_dict
+from app.api.schemas.inspection import (
+    ConfirmItemRequest,
+    ConvertToManualRequest,
+    CreateInspectionTaskRequest,
+    PrepareInspectionTaskRequest,
+    VoidTaskRequest,
+)
 from app.services import inspection_service
 
 router = APIRouter()
 
 
 @router.post("/api/v1/inspection-tasks/prepare")
-def prepare_inspection_task(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(inspection_service.prepare_inspection_task(payload, user))
+def prepare_inspection_task(payload: PrepareInspectionTaskRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.prepare_inspection_task(request_dict(payload), user))
 
 
 @router.post("/api/v1/inspection-tasks")
-def create_inspection_task(payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(inspection_service.create_inspection_task(payload, user))
+def create_inspection_task(payload: CreateInspectionTaskRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.create_inspection_task(request_dict(payload), user))
 
 
 @router.get("/api/v1/inspection-tasks")
@@ -50,13 +58,13 @@ def get_inspection_item(item_id: int, user: dict = Depends(current_user)) -> dic
 
 
 @router.post("/api/v1/inspection-items/{item_id}/convert-to-manual")
-def convert_to_manual(item_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(inspection_service.convert_to_manual(item_id, payload, user))
+def convert_to_manual(item_id: int, payload: ConvertToManualRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.convert_to_manual(item_id, request_dict(payload), user))
 
 
 @router.post("/api/v1/inspection-items/{item_id}/confirm")
-def confirm_item(item_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(inspection_service.confirm_item(item_id, payload, user))
+def confirm_item(item_id: int, payload: ConfirmItemRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.confirm_item(item_id, request_dict(payload), user))
 
 
 @router.post("/api/v1/inspection-tasks/{task_id}/archive-current-round")
@@ -65,8 +73,8 @@ def archive_current_round(task_id: int, user: dict = Depends(current_user)) -> d
 
 
 @router.post("/api/v1/inspection-tasks/{task_id}/void")
-def void_task(task_id: int, payload: dict = Body(...), user: dict = Depends(current_user)) -> dict[str, Any]:
-    return ok(inspection_service.void_task(task_id, payload, user))
+def void_task(task_id: int, payload: VoidTaskRequest, user: dict = Depends(current_user)) -> dict[str, Any]:
+    return ok(inspection_service.void_task(task_id, request_dict(payload), user))
 
 
 @router.get("/api/v1/rectification-items")
