@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Any
 
 from app.core.database import execute, from_json, query_all, query_one, to_json, transaction
-from app.core.enums import AdapterType, AutoCheckResult, AutoCheckStatus, InspectionItemStatus
+from app.core.enums import AdapterType, AutoCheckResult, AutoCheckStatus, InspectionItemStatus, SystemSettingKey
 from app.core.exceptions import BusinessError
 from app.vdrive import list_vdrive_files
 
@@ -68,20 +69,46 @@ def candidate_keywords(item: dict[str, Any], execution_rule_snapshot: dict[str, 
     return keywords
 
 
+def normalized_config_words(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    words: list[str] = []
+    for word in value or []:
+        if isinstance(word, dict):
+            word = word.get("keyword") or word.get("value") or word.get("text")
+        if word:
+            words.append(str(word).lower())
+    return words
+
+
+def file_matches_folder_keywords(file: dict[str, Any], folder_keywords: list[str]) -> bool:
+    if not folder_keywords:
+        return True
+    path = str(file.get("file_path") or "").lower()
+    return any(keyword in path for keyword in folder_keywords)
+
+
 def match_candidate_files(
     item: dict[str, Any], execution_rule_snapshot: dict[str, Any], files: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    config = execution_rule_snapshot.get("config_json") or {}
+    folder_keywords = normalized_config_words(config.get("folder_keywords"))
+    folder_non_empty = bool(config.get("folder_non_empty") or config.get("selection_strategy") == "folder_non_empty")
     keywords = candidate_keywords(item, execution_rule_snapshot)
-    if not keywords:
+    if not keywords and not folder_non_empty:
         return []
     matches: list[dict[str, Any]] = []
     for file in files:
+        if not file_matches_folder_keywords(file, folder_keywords):
+            continue
         haystack = " ".join(str(file.get(field) or "") for field in ("file_name", "file_path", "file_version")).lower()
-        score = sum(1 for keyword in keywords if keyword in haystack)
+        score = sum(1 for keyword in keywords if keyword in haystack) if keywords else 1
         if score:
             candidate = dict(file)
             candidate["recommend_score"] = min(1.0, score / max(len(keywords), 1))
-            candidate["recommend_reason"] = "文件名、路径或版本匹配自动执行规则关键词"
+            candidate["recommend_reason"] = "文件名、路径或版本匹配自动执行规则关键词" if keywords else "目标文件夹存在文件"
             matches.append(candidate)
     matches.sort(key=lambda file: (-float(file.get("recommend_score") or 0), str(file.get("file_name") or "")))
     return matches
@@ -183,8 +210,77 @@ def insert_candidate_files(result_id: int, candidates: list[dict[str, Any]], sel
         )
 
 
+def parse_file_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value)
+    for fmt, length in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d", 10)):
+        try:
+            return datetime.strptime(text[:length], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def freshness_failure_reason(candidate: dict[str, Any], freshness_days: int | None) -> str | None:
+    if not freshness_days:
+        return None
+    file_time = parse_file_datetime(candidate.get("created_time")) or parse_file_datetime(candidate.get("modified_time"))
+    if not file_time:
+        return f"候选文件缺少创建时间，无法确认是否在 {freshness_days} 天内更新。"
+    age_days = (datetime.now() - file_time).days
+    if age_days > freshness_days:
+        return f"候选文件创建时间距今 {age_days} 天，超过 {freshness_days} 天更新要求。"
+    return None
+
+
+def auto_check_enabled() -> bool:
+    row = query_one("SELECT value_json FROM system_settings WHERE key = ?", (SystemSettingKey.AUTO_CHECK_ENABLED,))
+    if not row:
+        return True
+    return bool(from_json(row["value_json"], True))
+
+
+def mark_auto_check_manual_required(item: dict[str, Any], execution_rule: dict[str, Any], evidence_text: str, raw_result: dict[str, Any] | None = None) -> dict[str, Any]:
+    with transaction():
+        result_id = insert_auto_check_result(
+            item["id"],
+            AutoCheckStatus.MANUAL_REQUIRED,
+            AutoCheckResult.MANUAL_REQUIRED,
+            evidence_text,
+            execution_rule,
+            raw_result or {},
+        )
+        execute("UPDATE inspection_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionItemStatus.MANUAL_REQUIRED, item["id"]))
+    return serialize_auto_check_result(query_one("SELECT * FROM auto_check_results WHERE id = ?", (result_id,)))
+
+
+def degrade_unsupported_auto_check(item: dict[str, Any], execution_rule: dict[str, Any]) -> dict[str, Any]:
+    config = execution_rule.get("config_json") or {}
+    reason = config.get("manual_reason")
+    if not reason:
+        if execution_rule.get("execution_mode") == "file_content":
+            reason = "当前文件内容解析能力未接入，需人工判断。"
+        elif execution_rule.get("execution_mode") == "system_direct":
+            reason = "当前系统直连核查能力未接入，需人工判断。"
+        else:
+            reason = "当前自动检查能力未接入，需人工判断。"
+    return mark_auto_check_manual_required(item, execution_rule, str(reason), {"degraded": True, "execution_mode": execution_rule.get("execution_mode")})
+
+
+def run_auto_check_for_item(item: dict[str, Any]) -> dict[str, Any]:
+    execution_rule = execution_rule_snapshot_for_item(item)
+    if not auto_check_enabled():
+        return mark_auto_check_manual_required(item, execution_rule, "自动检查开关已关闭，需人工判断。", {"auto_check_enabled": False})
+    if execution_rule.get("execution_mode") != "file_existence":
+        return degrade_unsupported_auto_check(item, execution_rule)
+    return scan_candidate_files(item)
+
+
 def scan_candidate_files(item: dict[str, Any]) -> dict[str, Any]:
     execution_rule = execution_rule_snapshot_for_item(item)
+    if execution_rule.get("execution_mode") != "file_existence":
+        raise BusinessError("AUTO_CHECK_MODE_UNSUPPORTED", "当前检查项不支持候选文件扫描")
     try:
         files = list_vdrive_files_for_item(item)
         candidates = match_candidate_files(item, execution_rule, files)
@@ -215,13 +311,18 @@ def scan_candidate_files(item: dict[str, Any]) -> dict[str, Any]:
             )
             execute("UPDATE inspection_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionItemStatus.MANUAL_REQUIRED, item["id"]))
         elif len(candidates) == 1:
+            config = execution_rule.get("config_json") or {}
+            freshness_days = config.get("freshness_days")
+            freshness_reason = freshness_failure_reason(candidates[0], int(freshness_days) if freshness_days else None)
+            auto_result = AutoCheckResult.FAIL if freshness_reason else AutoCheckResult.PASS
+            evidence_text = freshness_reason or "找到唯一匹配的 VDrive 候选文件，等待工程师确认。"
             result_id = insert_auto_check_result(
                 item["id"],
                 AutoCheckStatus.SUCCESS,
-                AutoCheckResult.PASS,
-                "找到唯一匹配的 VDrive 候选文件，等待工程师确认。",
+                auto_result,
+                evidence_text,
                 execution_rule,
-                {"candidate_count": 1},
+                {"candidate_count": 1, "freshness_days": freshness_days},
             )
             insert_candidate_files(result_id, candidates)
             execute("UPDATE inspection_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionItemStatus.AUTO_COMPLETED, item["id"]))

@@ -168,6 +168,12 @@ export type RuleChangeDetail = {
   item_type?: string | null;
   change_type: string;
   change_summary?: string | null;
+  change_details?: Array<{
+    field: string;
+    label: string;
+    old_value?: string | number | boolean | null;
+    new_value?: string | number | boolean | null;
+  }>;
 };
 
 export type RuleReleaseNodeDraft = {
@@ -193,12 +199,6 @@ export type RuleReleaseChange = RuleChangeDetail & {
   qg_node_id: number;
   node_code: string;
   business_rule_version_id?: number;
-  change_details?: Array<{
-    field: string;
-    label: string;
-    old_value?: string | number | boolean | null;
-    new_value?: string | number | boolean | null;
-  }>;
 };
 
 export type RuleReleaseDraft = {

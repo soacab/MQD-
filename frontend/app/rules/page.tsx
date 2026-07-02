@@ -116,6 +116,29 @@ function formatRuleChangeLine(item: { item_name: string; item_type?: string | nu
   return `${changeTypeLabel(item.change_type)} ${ruleCategoryLabel(item.item_type)}：${item.item_name}${summary}`;
 }
 
+function formatRuleFieldValue(field: string, value?: string | number | boolean | null) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  if (field === "item_type") {
+    return ruleCategoryLabel(String(value));
+  }
+  if (field === "check_type") {
+    return checkTypeLabels[String(value)] || String(value);
+  }
+  if (field === "is_apqp") {
+    return value === true || value === 1 ? "是" : "否";
+  }
+  if (field === "is_active") {
+    return value === true || value === 1 ? "启用" : "停用";
+  }
+  return String(value);
+}
+
+function formatRuleFieldChangeLine(detail: { field: string; label: string; old_value?: string | number | boolean | null; new_value?: string | number | boolean | null }) {
+  return `${detail.label}：${formatRuleFieldValue(detail.field, detail.old_value)} -> ${formatRuleFieldValue(detail.field, detail.new_value)}`;
+}
+
 function ruleFormFromRule(rule: BusinessRule) {
   return {
     item_name: rule.item_name,
@@ -124,6 +147,38 @@ function ruleFormFromRule(rule: BusinessRule) {
     is_apqp: asBoolean(rule.is_apqp) ? "true" : "false",
     is_active: asBoolean(rule.is_active) ? "true" : "false"
   };
+}
+
+function rulePayloadChanged(rule: BusinessRule, payload: { item_name: string; checklist_requirement: string; owner_dept: string; is_apqp: boolean; is_active: boolean }) {
+  return (
+    rule.item_name !== payload.item_name ||
+    (rule.checklist_requirement || "") !== payload.checklist_requirement ||
+    (rule.owner_dept || "") !== payload.owner_dept ||
+    asBoolean(rule.is_apqp) !== payload.is_apqp ||
+    asBoolean(rule.is_active) !== payload.is_active
+  );
+}
+
+function rulePatchFromDirtyFields(rule: BusinessRule, payload: { item_name: string; checklist_requirement: string; owner_dept: string; is_apqp: boolean; is_active: boolean }, dirtyFields: string[]) {
+  const patch: Record<string, unknown> = {};
+  for (const field of dirtyFields) {
+    if (field === "item_name" && rule.item_name !== payload.item_name) {
+      patch.item_name = payload.item_name;
+    }
+    if (field === "checklist_requirement" && (rule.checklist_requirement || "") !== payload.checklist_requirement) {
+      patch.checklist_requirement = payload.checklist_requirement;
+    }
+    if (field === "owner_dept" && (rule.owner_dept || "") !== payload.owner_dept) {
+      patch.owner_dept = payload.owner_dept;
+    }
+    if (field === "is_apqp" && asBoolean(rule.is_apqp) !== payload.is_apqp) {
+      patch.is_apqp = payload.is_apqp;
+    }
+    if (field === "is_active" && asBoolean(rule.is_active) !== payload.is_active) {
+      patch.is_active = payload.is_active;
+    }
+  }
+  return patch;
 }
 
 export default function RulesPage() {
@@ -135,6 +190,7 @@ export default function RulesPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<"auto" | "manual">("auto");
   const [ruleForm, setRuleForm] = useState(emptyRuleForm);
+  const [ruleFormDirtyFields, setRuleFormDirtyFields] = useState<string[]>([]);
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [editingRuleSource, setEditingRuleSource] = useState<BusinessRule | null>(null);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
@@ -155,6 +211,10 @@ export default function RulesPage() {
   const visibleRules = activeTab === "auto" ? autoRules : manualRules;
   const draftVersion = versions.find((version) => version.status === "draft") || null;
   const historyVersions = versions.filter((version) => version.status !== "draft");
+  const canSubmitUpgradeSuggestion = editingRuleSource?.item_type === "manual" && Boolean(editingRuleId);
+  const selectedNodeHasPublishableDraft = Boolean(
+    draftVersion && releaseDraft?.nodes.some((node) => node.qg_node_id === selectedNodeId)
+  );
 
   const selectedVersionMeta = useMemo(() => {
     if (!selectedVersion) {
@@ -284,7 +344,7 @@ export default function RulesPage() {
     try {
       const draft = await refreshRuleReleaseDraft(true);
       if (!draft?.has_draft) {
-        setMessage("当前没有未发布规则变更。");
+        setMessage("当前没有可发布的规则变更。");
         return;
       }
       setPublishOpen(true);
@@ -293,49 +353,46 @@ export default function RulesPage() {
     }
   }
 
-  async function openCreateRuleModal() {
+  function openCreateRuleModal() {
     if (!canManageRules) {
       setMessage("仅规则管理员可编辑，其他用户只能查看。");
       return;
     }
-    try {
-      await ensureEditableVersion();
-      setEditingRuleId(null);
-      setEditingRuleSource(null);
-      setRuleModalReadonly(false);
-      setRuleForm(emptyRuleForm);
-      setRuleModalOpen(true);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "准备编辑版本失败");
-    }
+    setEditingRuleId(null);
+    setEditingRuleSource(null);
+    setRuleModalReadonly(false);
+    setRuleForm(emptyRuleForm);
+    setRuleFormDirtyFields([]);
+    setRuleModalOpen(true);
   }
 
-  async function openRuleModal(rule: BusinessRule) {
+  function openRuleModal(rule: BusinessRule) {
     if (!canManageRules) {
       setEditingRuleId(rule.id);
       setEditingRuleSource(rule);
       setRuleModalReadonly(true);
       setRuleForm(ruleFormFromRule(rule));
+      setRuleFormDirtyFields([]);
       setRuleModalOpen(true);
       return;
     }
-    try {
-      const editable = await ensureEditableVersion(rule);
-      const targetRule = editable.rule || rule;
-      setEditingRuleId(targetRule.id);
-      setEditingRuleSource(targetRule);
-      setRuleModalReadonly(false);
-      setRuleForm(ruleFormFromRule(targetRule));
-      setRuleModalOpen(true);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "准备编辑版本失败");
-    }
+    setEditingRuleId(rule.id);
+    setEditingRuleSource(rule);
+    setRuleModalReadonly(false);
+    setRuleForm(ruleFormFromRule(rule));
+    setRuleFormDirtyFields([]);
+    setRuleModalOpen(true);
+  }
+
+  function updateRuleFormField(field: keyof typeof emptyRuleForm, value: string) {
+    setRuleForm((current) => ({ ...current, [field]: value }));
+    setRuleFormDirtyFields((current) => (current.includes(field) ? current : [...current, field]));
   }
 
   async function handleSaveRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedVersion || selectedVersion.status !== "draft") {
-      setMessage("请先进入可编辑规则版本。");
+    if (!selectedVersion) {
+      setMessage("请先选择 QG 节点。");
       return;
     }
     if (!canManageRules) {
@@ -351,21 +408,46 @@ export default function RulesPage() {
         is_active: ruleForm.is_active === "true"
       };
       const wasCreating = !editingRuleId;
+      let dirtyPayload: Record<string, unknown> = {};
       if (editingRuleId) {
-        await updateBusinessRule(editingRuleId, payload);
+        if (!editingRuleSource) {
+          setMessage("未找到待编辑检查项。");
+          return;
+        }
+        dirtyPayload = rulePatchFromDirtyFields(editingRuleSource, payload, ruleFormDirtyFields);
+        if (!ruleFormDirtyFields.length || !Object.keys(dirtyPayload).length || !rulePayloadChanged(editingRuleSource, payload)) {
+          closeRuleModal();
+          setMessage("未检测到字段变化，无需发布规则版本。");
+          return;
+        }
+      }
+      const editable = editingRuleId
+        ? await ensureEditableVersion(editingRuleSource || undefined)
+        : await ensureEditableVersion();
+      if (editingRuleId) {
+        const targetRule = editable.rule || editingRuleSource;
+        if (!targetRule) {
+          setMessage("未找到待编辑检查项。");
+          return;
+        }
+        await updateBusinessRule(targetRule.id, dirtyPayload);
       } else {
-        await createBusinessRule(selectedVersion.id, payload);
+        await createBusinessRule(editable.version.id, payload);
       }
       if (wasCreating) {
         setActiveTab("manual");
       }
       closeRuleModal();
-      setMessage("提交升级建议已保存到未发布草稿。");
-      await loadNode(selectedVersion.qg_node_id, selectedVersion.id);
+      setMessage(wasCreating ? "新增人工检查项已保存到未发布草稿。" : "检查项修改已保存到未发布草稿。");
+      await loadNode(editable.version.qg_node_id, editable.version.id);
       await refreshRuleReleaseDraft(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存检查项失败");
     }
+  }
+
+  function openUpgradeSuggestion() {
+    setMessage("人工检查项升级建议入口已保留，建议内容持久化将在后续功能中接入。");
   }
 
   async function stopManualRule(rule: BusinessRule) {
@@ -394,6 +476,7 @@ export default function RulesPage() {
     setRuleModalOpen(false);
     setEditingRuleId(null);
     setEditingRuleSource(null);
+    setRuleFormDirtyFields([]);
   }
 
   async function confirmPublish() {
@@ -401,7 +484,7 @@ export default function RulesPage() {
       return;
     }
     if (!releaseDraft?.has_draft) {
-      setMessage("当前没有未发布规则变更。");
+      setMessage("当前没有可发布的规则变更。");
       setPublishOpen(false);
       return;
     }
@@ -460,9 +543,9 @@ export default function RulesPage() {
                 {selectedVersion ? <span>{selectedVersion.version_no}</span> : null}
               </div>
               <p>{selectedVersionMeta}</p>
-              {canManageRules && draftVersion && selectedVersion?.id !== draftVersion.id ? (
+              {canManageRules && selectedNodeHasPublishableDraft && selectedVersion?.id !== draftVersion?.id ? (
                 <p className="rules-draft-note">
-                  有未发布的修改 {draftVersion.version_no}
+                  有待发布规则变更 {draftVersion?.version_no}
                 </p>
               ) : null}
             </div>
@@ -552,7 +635,16 @@ export default function RulesPage() {
                     <ul className="plain-list">
                       {(version.change_details || []).map((item, index) => (
                         <li key={`${version.id}-${item.item_name}-${index}`}>
-                          {formatRuleChangeLine(item)}
+                          <div>{formatRuleChangeLine(item)}</div>
+                          {item.change_details?.length ? (
+                            <ul className="plain-list">
+                              {item.change_details.map((detail) => (
+                                <li key={`${version.id}-${item.rule_code}-${detail.field}`}>
+                                  {formatRuleFieldChangeLine(detail)}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -574,27 +666,27 @@ export default function RulesPage() {
             </header>
             <label>
               检查项名称
-              <input value={ruleForm.item_name} onChange={(event) => setRuleForm({ ...ruleForm, item_name: event.target.value })} disabled={ruleModalReadonly} required />
+              <input value={ruleForm.item_name} onChange={(event) => updateRuleFormField("item_name", event.target.value)} disabled={ruleModalReadonly} required />
             </label>
             <label>
               Checklist 要求
-              <textarea value={ruleForm.checklist_requirement} onChange={(event) => setRuleForm({ ...ruleForm, checklist_requirement: event.target.value })} disabled={ruleModalReadonly} />
+              <textarea value={ruleForm.checklist_requirement} onChange={(event) => updateRuleFormField("checklist_requirement", event.target.value)} disabled={ruleModalReadonly} />
             </label>
             <label>
               责任方
-              <input value={ruleForm.owner_dept} onChange={(event) => setRuleForm({ ...ruleForm, owner_dept: event.target.value })} disabled={ruleModalReadonly} />
+              <input value={ruleForm.owner_dept} onChange={(event) => updateRuleFormField("owner_dept", event.target.value)} disabled={ruleModalReadonly} />
             </label>
             <div className="rules-modal-grid">
               <label>
                 APQP
-                <select value={ruleForm.is_apqp} onChange={(event) => setRuleForm({ ...ruleForm, is_apqp: event.target.value })} disabled={ruleModalReadonly}>
+                <select value={ruleForm.is_apqp} onChange={(event) => updateRuleFormField("is_apqp", event.target.value)} disabled={ruleModalReadonly}>
                   <option value="true">是</option>
                   <option value="false">否</option>
                 </select>
               </label>
               <label>
                 状态
-                <select value={ruleForm.is_active} onChange={(event) => setRuleForm({ ...ruleForm, is_active: event.target.value })} disabled={ruleModalReadonly}>
+                <select value={ruleForm.is_active} onChange={(event) => updateRuleFormField("is_active", event.target.value)} disabled={ruleModalReadonly}>
                   <option value="true">启用</option>
                   <option value="false">停用</option>
                 </select>
@@ -603,10 +695,15 @@ export default function RulesPage() {
             <footer>
               {!ruleModalReadonly ? (
                 <>
-                  <button type="submit" disabled={!selectedVersion || selectedVersion.status !== "draft"}>
-                    提交升级建议
+                  <button type="submit" disabled={!selectedVersion}>
+                    {editingRuleId ? "保存修改" : "确认"}
                   </button>
-                  {editingRuleSource?.item_type === "manual" ? (
+                  {canSubmitUpgradeSuggestion ? (
+                    <button type="button" className="secondary-button" onClick={openUpgradeSuggestion}>
+                      提交升级建议
+                    </button>
+                  ) : null}
+                  {canSubmitUpgradeSuggestion && editingRuleSource ? (
                     <button
                       type="button"
                       className="secondary-button"
@@ -637,7 +734,7 @@ export default function RulesPage() {
               <ul className="plain-list">
                 {(releaseDraft?.version_changes || []).map((item) => (
                   <li key={`${item.qg_node_id}-${item.new_version_id}`}>
-                    节 {item.node_code}：{item.old_version_no || "-"} → {item.new_version_no}
+                    {item.node_code}：{item.old_version_no || "-"}{" -> "}{item.new_version_no}
                   </li>
                 ))}
               </ul>
@@ -650,10 +747,18 @@ export default function RulesPage() {
                   <ul className="plain-list">
                     {node.changes.map((item, index) => (
                       <li key={`${node.qg_node_id}-${item.rule_code}-${item.change_type}-${index}`}>
-                        {formatRuleChangeLine(item)}
+                        <div>{formatRuleChangeLine(item)}</div>
+                        {item.change_details?.length ? (
+                          <ul className="plain-list">
+                            {item.change_details.map((detail) => (
+                              <li key={`${node.qg_node_id}-${item.rule_code}-${detail.field}`}>
+                                {formatRuleFieldChangeLine(detail)}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </li>
                     ))}
-                    {!node.changes.length ? <li>无字段变化，仅发布版本状态。</li> : null}
                   </ul>
                 </div>
               ))}

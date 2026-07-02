@@ -18,6 +18,13 @@ RULE_CHANGE_FIELDS = (
     "is_active",
     "sort_order",
 )
+RULE_CHANGE_SNAPSHOT_FIELDS = (
+    "item_name",
+    "item_type",
+    "checklist_requirement",
+    "owner_dept",
+    "is_active",
+)
 
 RULE_CHANGE_FIELD_LABELS = {
     "item_name": "检查项名称",
@@ -28,6 +35,18 @@ RULE_CHANGE_FIELD_LABELS = {
     "is_apqp": "APQP",
     "is_active": "启用状态",
     "sort_order": "排序",
+}
+EXECUTION_RULE_CHANGE_FIELDS = (
+    "execution_mode",
+    "adapter_type",
+    "config_json",
+    "is_enabled",
+)
+EXECUTION_RULE_CHANGE_FIELD_LABELS = {
+    "execution_mode": "执行方式",
+    "adapter_type": "适配器",
+    "config_json": "执行配置",
+    "is_enabled": "启用状态",
 }
 
 
@@ -269,6 +288,24 @@ def rules_by_code(version_id: int | None) -> dict[str, dict[str, Any]]:
     return {row["rule_code"]: row for row in rows}
 
 
+def execution_rules_by_rule_code(version_id: int | None) -> dict[str, dict[str, Any]]:
+    if not version_id:
+        return {}
+    rows = query_all(
+        """
+        SELECT
+            r.rule_code, r.item_name, r.item_type,
+            e.execution_mode, e.adapter_type, e.config_json, e.is_enabled
+        FROM business_check_rules r
+        JOIN auto_check_execution_rules e ON e.business_check_rule_id = r.id
+        WHERE r.business_rule_version_id = ?
+        ORDER BY r.sort_order, r.id, e.id
+        """,
+        (version_id,),
+    )
+    return {row["rule_code"]: row for row in rows}
+
+
 def normalized_rule_value(value: Any) -> Any:
     return None if value == "" else value
 
@@ -289,6 +326,68 @@ def rule_field_diffs(old_rule: dict[str, Any], draft_rule: dict[str, Any]) -> li
             }
         )
     return diffs
+
+
+def rule_field_snapshot(rule: dict[str, Any], *, added: bool) -> list[dict[str, Any]]:
+    details = []
+    for field in RULE_CHANGE_SNAPSHOT_FIELDS:
+        value = normalized_rule_value(rule.get(field))
+        details.append(
+            {
+                "field": field,
+                "label": RULE_CHANGE_FIELD_LABELS[field],
+                "old_value": None if added else value,
+                "new_value": value if added else None,
+            }
+        )
+    return details
+
+
+def rule_key_field_details(old_rule: dict[str, Any], draft_rule: dict[str, Any]) -> list[dict[str, Any]]:
+    details = []
+    for field in RULE_CHANGE_SNAPSHOT_FIELDS:
+        details.append(
+            {
+                "field": field,
+                "label": RULE_CHANGE_FIELD_LABELS[field],
+                "old_value": normalized_rule_value(old_rule.get(field)),
+                "new_value": normalized_rule_value(draft_rule.get(field)),
+            }
+        )
+    return details
+
+
+def execution_field_diffs(old_rule: dict[str, Any], draft_rule: dict[str, Any]) -> list[dict[str, Any]]:
+    diffs = []
+    for field in EXECUTION_RULE_CHANGE_FIELDS:
+        old_value = normalized_rule_value(old_rule.get(field))
+        new_value = normalized_rule_value(draft_rule.get(field))
+        if old_value == new_value:
+            continue
+        diffs.append(
+            {
+                "field": field,
+                "label": EXECUTION_RULE_CHANGE_FIELD_LABELS[field],
+                "old_value": old_value,
+                "new_value": new_value,
+            }
+        )
+    return diffs
+
+
+def execution_field_snapshot(rule: dict[str, Any], *, added: bool) -> list[dict[str, Any]]:
+    details = []
+    for field in EXECUTION_RULE_CHANGE_FIELDS:
+        value = normalized_rule_value(rule.get(field))
+        details.append(
+            {
+                "field": field,
+                "label": EXECUTION_RULE_CHANGE_FIELD_LABELS[field],
+                "old_value": None if added else value,
+                "new_value": value if added else None,
+            }
+        )
+    return details
 
 
 def change_summary_for(
@@ -325,9 +424,10 @@ def rule_changes_between_versions(
         change_details: list[dict[str, Any]] = []
         if not old_rule:
             change_type = "added"
+            change_details = rule_field_snapshot(draft_rule, added=True)
         elif old_rule.get("is_active") and not draft_rule.get("is_active"):
             change_type = "disabled"
-            change_details = rule_field_diffs(old_rule, draft_rule)
+            change_details = rule_key_field_details(old_rule, draft_rule)
         else:
             change_details = rule_field_diffs(old_rule, draft_rule)
             if not change_details:
@@ -359,7 +459,58 @@ def rule_changes_between_versions(
                 "item_type": old_rule.get("item_type"),
                 "change_type": "removed",
                 "change_summary": change_summary_for("removed", old_rule, None),
-                "change_details": [],
+                "change_details": rule_field_snapshot(old_rule, added=False),
+            }
+        )
+    return changes
+
+
+def execution_rule_changes_between_versions(
+    qg_node_id: int,
+    node_code: str,
+    old_version: dict[str, Any] | None,
+    draft_version: dict[str, Any],
+) -> list[dict[str, Any]]:
+    old_rules = execution_rules_by_rule_code(old_version["id"] if old_version else None)
+    draft_rules = execution_rules_by_rule_code(draft_version["id"])
+    changes: list[dict[str, Any]] = []
+    for rule_code, draft_rule in draft_rules.items():
+        old_rule = old_rules.get(rule_code)
+        if not old_rule:
+            change_details = execution_field_snapshot(draft_rule, added=True)
+            change_summary = "自动执行配置新增"
+        else:
+            change_details = execution_field_diffs(old_rule, draft_rule)
+            if not change_details:
+                continue
+            change_summary = "自动执行配置更新"
+        changes.append(
+            {
+                "qg_node_id": qg_node_id,
+                "node_code": node_code,
+                "business_rule_version_id": draft_version["id"],
+                "rule_code": rule_code,
+                "item_name": draft_rule["item_name"],
+                "item_type": draft_rule.get("item_type"),
+                "change_type": "modified",
+                "change_summary": change_summary,
+                "change_details": change_details,
+            }
+        )
+    for rule_code, old_rule in old_rules.items():
+        if rule_code in draft_rules:
+            continue
+        changes.append(
+            {
+                "qg_node_id": qg_node_id,
+                "node_code": node_code,
+                "business_rule_version_id": draft_version["id"],
+                "rule_code": rule_code,
+                "item_name": old_rule["item_name"],
+                "item_type": old_rule.get("item_type"),
+                "change_type": "modified",
+                "change_summary": "自动执行配置删除",
+                "change_details": execution_field_snapshot(old_rule, added=False),
             }
         )
     return changes
@@ -373,6 +524,9 @@ def build_rule_release_draft() -> dict[str, Any]:
         old_version = current_published_rule_version(draft["qg_node_id"])
         old_version_no = old_version["version_no"] if old_version else None
         changes = rule_changes_between_versions(draft["qg_node_id"], draft["node_code"], old_version, draft)
+        changes.extend(execution_rule_changes_between_versions(draft["qg_node_id"], draft["node_code"], old_version, draft))
+        if not changes:
+            continue
         node_preview = {
             "qg_node_id": draft["qg_node_id"],
             "node_code": draft["node_code"],

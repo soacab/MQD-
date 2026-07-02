@@ -51,8 +51,10 @@ class SeedDataTest(unittest.TestCase):
             )
         }
         self.assertEqual(rule_counts["QG2"], 6)
-        self.assertEqual(rule_counts["QG3"], 18)
-        self.assertEqual(rule_counts["QG3.3"], 15)
+        self.assertEqual(rule_counts["QG3.1"], 8)
+        self.assertEqual(rule_counts["QG3.2"], 11)
+        self.assertEqual(rule_counts["QG3"], 17)
+        self.assertEqual(rule_counts["QG3.3"], 16)
         self.assertEqual(rule_counts["QG4"], 22)
 
         before = {
@@ -136,6 +138,15 @@ class SeedDataTest(unittest.TestCase):
         self.assertEqual(existing_rule["is_apqp"], 0)
         self.assertEqual(existing_rule["is_active"], 0)
         self.assertEqual(existing_rule["sort_order"], 99)
+        execution_count = query_one(
+            """
+            SELECT COUNT(*) AS total
+            FROM auto_check_execution_rules
+            WHERE business_check_rule_id = ?
+            """,
+            (existing_rule["id"],),
+        )["total"]
+        self.assertEqual(execution_count, 0)
 
         qg2_count = query_one(
             """
@@ -149,14 +160,51 @@ class SeedDataTest(unittest.TestCase):
         )["total"]
         self.assertEqual(qg2_count, 6)
 
-    def test_seed_database_does_not_create_auto_execution_rules(self):
-        from app.core.database import query_one
+    def test_seed_database_creates_auto_execution_rules_for_auto_and_system_rules(self):
+        from app.core.database import query_all, query_one
         from app.seed import seed_database
 
         seed_database()
 
+        executable_rule_count = query_one(
+            "SELECT COUNT(*) AS total FROM business_check_rules WHERE item_type IN ('auto', 'system')"
+        )["total"]
         execution_count = query_one("SELECT COUNT(*) AS total FROM auto_check_execution_rules")["total"]
-        self.assertEqual(execution_count, 0)
+        self.assertEqual(execution_count, executable_rule_count)
+
+        qg4_inherit_rows = query_all(
+            """
+            SELECT r.rule_code, r.item_type, r.check_type
+            FROM business_check_rules r
+            JOIN business_rule_versions v ON v.id = r.business_rule_version_id
+            JOIN qg_nodes q ON q.id = v.qg_node_id
+            WHERE q.node_code = 'QG4' AND r.rule_code LIKE 'QG4:INHERIT_%'
+            """
+        )
+        self.assertTrue(qg4_inherit_rows)
+        self.assertEqual({row["item_type"] for row in qg4_inherit_rows}, {"inherit"})
+        self.assertEqual({row["check_type"] for row in qg4_inherit_rows}, {"inherit"})
+
+        plm_rule = query_one("SELECT item_type, check_type FROM business_check_rules WHERE rule_code = ?", ("QG4:PLM_THREE_DOCS_RELEASE",))
+        self.assertEqual(plm_rule["item_type"], "manual")
+        self.assertEqual(plm_rule["check_type"], "manual")
+
+        execution = query_one(
+            """
+            SELECT e.execution_mode, e.adapter_type, e.config_json
+            FROM auto_check_execution_rules e
+            JOIN business_check_rules r ON r.id = e.business_check_rule_id
+            WHERE r.rule_code = ?
+            """,
+            ("QG3.2:PFMEA_FRESHNESS",),
+        )
+        self.assertEqual(execution["execution_mode"], "file_existence")
+        self.assertEqual(execution["adapter_type"], "vdrive")
+        self.assertIn("freshness_days", execution["config_json"])
+
+        seed_database()
+        repeated_execution_count = query_one("SELECT COUNT(*) AS total FROM auto_check_execution_rules")["total"]
+        self.assertEqual(repeated_execution_count, execution_count)
 
 
 if __name__ == "__main__":

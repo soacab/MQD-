@@ -74,7 +74,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -208,7 +208,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -270,7 +270,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -314,7 +314,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -345,7 +345,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -390,7 +390,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -538,7 +538,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -622,7 +622,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -679,7 +679,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -764,7 +764,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -1062,8 +1062,8 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(nodes.status_code, 200, nodes.text)
         qg33 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG3.3")
         qg3 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG3")
-        self.assertEqual(qg33["published_rule_count"], 15)
-        self.assertEqual(qg3["published_rule_count"], 18)
+        self.assertEqual(qg33["published_rule_count"], 16)
+        self.assertEqual(qg3["published_rule_count"], 17)
 
         draft = self.client.post(f"/api/v1/qg-nodes/{qg33['id']}/editable-rule-version", headers=self.headers)
         self.assertEqual(draft.status_code, 200, draft.text)
@@ -1084,14 +1084,14 @@ class P0MainFlowTest(unittest.TestCase):
         nodes_before_publish = self.client.get("/api/v1/qg-nodes", headers=self.headers)
         self.assertEqual(nodes_before_publish.status_code, 200, nodes_before_publish.text)
         qg33_before_publish = next(row for row in nodes_before_publish.json()["data"]["items"] if row["node_code"] == "QG3.3")
-        self.assertEqual(qg33_before_publish["published_rule_count"], 15)
+        self.assertEqual(qg33_before_publish["published_rule_count"], 16)
 
         published = self.client.post(f"/api/v1/business-rule-versions/{draft_id}/publish", headers=self.headers)
         self.assertEqual(published.status_code, 200, published.text)
         nodes_after_publish = self.client.get("/api/v1/qg-nodes", headers=self.headers)
         self.assertEqual(nodes_after_publish.status_code, 200, nodes_after_publish.text)
         qg33_after_publish = next(row for row in nodes_after_publish.json()["data"]["items"] if row["node_code"] == "QG3.3")
-        self.assertEqual(qg33_after_publish["published_rule_count"], 16)
+        self.assertEqual(qg33_after_publish["published_rule_count"], 17)
 
     def test_publish_rule_version_does_not_require_auto_execution_rules(self):
         _, version_id, _auto_rule_id = self._create_project_and_rules()
@@ -1110,7 +1110,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -1140,7 +1140,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -1154,7 +1154,7 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(published.status_code, 200, published.text)
         self.assertEqual(published.json()["data"]["change_summary"], "QG2 rules updated from workspace")
 
-    def test_rule_release_draft_previews_all_node_drafts(self):
+    def test_rule_release_draft_previews_changed_node_drafts_with_field_details(self):
         from app.core.database import execute
 
         nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
@@ -1168,10 +1168,11 @@ class P0MainFlowTest(unittest.TestCase):
         edited = self.client.patch(
             f"/api/v1/business-check-rules/{qg2_rule['id']}",
             headers=self.headers,
-            json={"checklist_requirement": "Updated QG2 release batch requirement."},
+            json={"checklist_requirement": "Updated QG2 release batch requirement.", "owner_dept": "PT"},
         )
         self.assertEqual(edited.status_code, 200, edited.text)
         removed_rule = qg2_draft.json()["data"]["business_check_rules"][1]
+        execute("DELETE FROM auto_check_execution_rules WHERE business_check_rule_id = ?", (removed_rule["id"],))
         execute("DELETE FROM business_check_rules WHERE id = ?", (removed_rule["id"],))
 
         qg4_draft = self.client.post(f"/api/v1/qg-nodes/{qg4['id']}/editable-rule-version", headers=self.headers)
@@ -1205,7 +1206,80 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertIn("added", {change["change_type"] for change in changes_by_node["QG4"]})
         modified_change = next(change for change in changes_by_node["QG2"] if change["change_type"] == "modified")
         self.assertIn("Checklist 要求", modified_change["change_summary"])
-        self.assertEqual(modified_change["change_details"][0]["field"], "checklist_requirement")
+        modified_details = {detail["field"]: detail for detail in modified_change["change_details"]}
+        self.assertEqual(modified_details["checklist_requirement"]["old_value"], qg2_rule["checklist_requirement"])
+        self.assertEqual(modified_details["checklist_requirement"]["new_value"], "Updated QG2 release batch requirement.")
+        self.assertEqual(modified_details["owner_dept"]["old_value"], qg2_rule["owner_dept"])
+        self.assertEqual(modified_details["owner_dept"]["new_value"], "PT")
+        added_change = next(change for change in changes_by_node["QG4"] if change["change_type"] == "added")
+        added_details = {detail["field"]: detail for detail in added_change["change_details"]}
+        self.assertEqual(added_details["item_name"]["new_value"], "Release batch added manual item")
+        self.assertEqual(added_details["checklist_requirement"]["new_value"], "Included in global release draft.")
+        self.assertEqual(added_details["owner_dept"]["new_value"], "MQD")
+        removed_change = next(change for change in changes_by_node["QG2"] if change["change_type"] == "removed")
+        removed_details = {detail["field"]: detail for detail in removed_change["change_details"]}
+        self.assertEqual(removed_details["item_name"]["old_value"], removed_rule["item_name"])
+        self.assertIsNone(removed_details["item_name"]["new_value"])
+
+    def test_rule_release_draft_ignores_unmodified_draft_versions(self):
+        from app.core.database import query_one
+
+        nodes = self.client.get("/api/v1/qg-nodes", headers=self.headers)
+        self.assertEqual(nodes.status_code, 200, nodes.text)
+        qg2 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG2")
+
+        draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(draft.status_code, 200, draft.text)
+        draft_id = draft.json()["data"]["id"]
+
+        preview = self.client.get("/api/v1/business-rule-release-draft", headers=self.headers)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(preview.json()["data"], {"has_draft": False, "nodes": [], "version_changes": [], "changes": []})
+
+        published = self.client.post("/api/v1/business-rule-release-batches/publish", headers=self.headers, json={})
+        self.assertEqual(published.status_code, 400)
+        self.assertEqual(published.json()["error"]["code"], "NO_RULE_RELEASE_DRAFT")
+        self.assertEqual(query_one("SELECT status FROM business_rule_versions WHERE id = ?", (draft_id,))["status"], "draft")
+
+    def test_rule_release_draft_includes_execution_rule_only_changes(self):
+        _, version_id, auto_rule_id = self._create_project_and_rules()
+        execution_rule = self.client.post(
+            f"/api/v1/business-check-rules/{auto_rule_id}/auto-check-execution-rules",
+            headers=self.headers,
+            json={
+                "execution_mode": "file_existence",
+                "adapter_type": "vdrive",
+                "is_enabled": True,
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
+            },
+        )
+        self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
+        published = self.client.post(f"/api/v1/business-rule-versions/{version_id}/publish", headers=self.headers)
+        self.assertEqual(published.status_code, 200, published.text)
+
+        draft = self.client.post("/api/v1/qg-nodes/1/editable-rule-version", headers=self.headers)
+        self.assertEqual(draft.status_code, 200, draft.text)
+        draft_auto_rule = next(rule for rule in draft.json()["data"]["business_check_rules"] if rule["rule_code"] == "P0_AUTO")
+        draft_execution_rule = draft_auto_rule["auto_check_execution_rules"][0]
+        edited = self.client.patch(
+            f"/api/v1/auto-check-execution-rules/{draft_execution_rule['id']}",
+            headers=self.headers,
+            json={"config_json": {"mock": False, "path": "updated"}},
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+
+        preview = self.client.get("/api/v1/business-rule-release-draft", headers=self.headers)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        data = preview.json()["data"]
+        self.assertTrue(data["has_draft"])
+        self.assertEqual([item["node_code"] for item in data["nodes"]], ["QG2"])
+        change = data["nodes"][0]["changes"][0]
+        self.assertEqual(change["rule_code"], "P0_AUTO")
+        self.assertEqual(change["change_type"], "modified")
+        self.assertEqual(change["change_summary"], "自动执行配置更新")
+        details = {detail["field"]: detail for detail in change["change_details"]}
+        self.assertIn('"PFMEA_V3"', details["config_json"]["old_value"])
+        self.assertIn('"mock": false', details["config_json"]["new_value"])
 
     def test_publish_rule_release_batch_publishes_all_drafts_and_writes_audit_tables(self):
         from app.core.database import query_all, query_one
@@ -1214,6 +1288,7 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(nodes.status_code, 200, nodes.text)
         qg2 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG2")
         qg3 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG3")
+        qg4 = next(row for row in nodes.json()["data"]["items"] if row["node_code"] == "QG4")
 
         qg2_draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
         self.assertEqual(qg2_draft.status_code, 200, qg2_draft.text)
@@ -1234,6 +1309,8 @@ class P0MainFlowTest(unittest.TestCase):
             json={"item_name": "QG3 release batch edited item"},
         )
         self.assertEqual(edited.status_code, 200, edited.text)
+        qg4_draft = self.client.post(f"/api/v1/qg-nodes/{qg4['id']}/editable-rule-version", headers=self.headers)
+        self.assertEqual(qg4_draft.status_code, 200, qg4_draft.text)
 
         published = self.client.post(
             "/api/v1/business-rule-release-batches/publish",
@@ -1257,13 +1334,24 @@ class P0MainFlowTest(unittest.TestCase):
             )
         }
         self.assertIn("disabled", qg2_change_types)
+        qg2_disabled_change = next(change for item in data["items"] if item["node_code"] == "QG2" for change in item["changes"] if change["change_type"] == "disabled")
+        qg2_disabled_details = {detail["field"]: detail for detail in qg2_disabled_change["change_details"]}
+        self.assertEqual(qg2_disabled_details["item_name"]["old_value"], qg2_rule["item_name"])
+        self.assertEqual(qg2_disabled_details["checklist_requirement"]["old_value"], qg2_rule["checklist_requirement"])
+        self.assertEqual(qg2_disabled_details["owner_dept"]["old_value"], qg2_rule["owner_dept"])
+        self.assertEqual(qg2_disabled_details["is_active"]["old_value"], 1)
+        self.assertEqual(qg2_disabled_details["is_active"]["new_value"], 0)
         self.assertEqual(
             query_all("SELECT DISTINCT status FROM business_rule_versions WHERE id IN (?, ?)", (qg2_draft.json()["data"]["id"], qg3_draft.json()["data"]["id"])),
             [{"status": "published"}],
         )
         self.assertEqual(
             query_one("SELECT COUNT(*) AS total FROM business_rule_versions WHERE status = 'draft'")["total"],
-            0,
+            1,
+        )
+        self.assertEqual(
+            query_one("SELECT status FROM business_rule_versions WHERE id = ?", (qg4_draft.json()["data"]["id"],))["status"],
+            "draft",
         )
 
     def test_publish_rule_release_batch_rolls_back_when_late_step_fails(self):
@@ -1276,8 +1364,22 @@ class P0MainFlowTest(unittest.TestCase):
 
         qg2_draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
         self.assertEqual(qg2_draft.status_code, 200, qg2_draft.text)
+        qg2_rule = qg2_draft.json()["data"]["business_check_rules"][0]
+        qg2_edit = self.client.patch(
+            f"/api/v1/business-check-rules/{qg2_rule['id']}",
+            headers=self.headers,
+            json={"owner_dept": "PT"},
+        )
+        self.assertEqual(qg2_edit.status_code, 200, qg2_edit.text)
         qg4_draft = self.client.post(f"/api/v1/qg-nodes/{qg4['id']}/editable-rule-version", headers=self.headers)
         self.assertEqual(qg4_draft.status_code, 200, qg4_draft.text)
+        qg4_rule = qg4_draft.json()["data"]["business_check_rules"][0]
+        qg4_edit = self.client.patch(
+            f"/api/v1/business-check-rules/{qg4_rule['id']}",
+            headers=self.headers,
+            json={"owner_dept": "PT"},
+        )
+        self.assertEqual(qg4_edit.status_code, 200, qg4_edit.text)
 
         with patch("app.services.rule_service.audit", side_effect=RuntimeError("forced release audit failure")):
             failed = self.client.post("/api/v1/business-rule-release-batches/publish", headers=self.headers, json={})
@@ -1298,6 +1400,13 @@ class P0MainFlowTest(unittest.TestCase):
         draft = self.client.post(f"/api/v1/qg-nodes/{qg2['id']}/editable-rule-version", headers=self.headers)
         self.assertEqual(draft.status_code, 200, draft.text)
         draft_id = draft.json()["data"]["id"]
+        draft_rule = draft.json()["data"]["business_check_rules"][0]
+        edited = self.client.patch(
+            f"/api/v1/business-check-rules/{draft_rule['id']}",
+            headers=self.headers,
+            json={"owner_dept": "PT"},
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
         stale_preview = self.client.get("/api/v1/business-rule-release-draft", headers=self.headers)
         self.assertEqual(stale_preview.status_code, 200, stale_preview.text)
 
@@ -1320,7 +1429,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -1351,7 +1460,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)
@@ -1402,7 +1511,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "execution_mode": "file_existence",
                 "adapter_type": "vdrive",
                 "is_enabled": True,
-                "config_json": {"mock": True},
+                "config_json": {"candidate_keywords": ["PFMEA_V3"]},
             },
         )
         self.assertEqual(execution_rule.status_code, 200, execution_rule.text)

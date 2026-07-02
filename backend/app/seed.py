@@ -1,3 +1,5 @@
+import re
+
 from app.core.database import execute, query_all, query_one, to_json
 from app.core.enums import Permission, SystemSettingKey, UserStatus
 
@@ -32,7 +34,7 @@ PROTOTYPE_RULE_DATA = {
             ("QG3.1:SPECIAL_CHARACTERISTICS", "过程特殊特性", "ai-exist", "产品&过程特殊特性清单", "SC/过程特殊特性清单/特殊特性", "收到产品SC并转化为过程SC", "single_template", "MP"),
             ("QG3.1:FLOW_CHART", "流程图", "ai-exist", "Flow chart", "FC/工艺流程图/流程图", "初始的流程图发布在PLM系统", "single_template", "PT"),
             ("QG3.1:PFMEA", "PFMEA", "ai-exist", "PFMEA", "PFMEA", "初始的PFAMA发布在PLM系统", "single_template", "MP"),
-            ("QG3.1:TOOLING_PLAN", "工装设备开发计划", "ai-content", "装配工装和配件release file", "工装需求表", "提供装配/测试/ICT的工装开发计划", "single_template", "PT/TE"),
+            ("QG3.1:TOOLING_PLAN", "工装设备开发计划", "ai-exist", "装配工装和配件release file", "工装需求表", "提供装配/测试/ICT的工装开发计划", "single_template", "PT/TE"),
         ],
         "manual": [
             ("QG3.1:HISTORY_ISSUES", "过往问题点", "是否按计划实施并验证有效？", "MQD"),
@@ -68,6 +70,7 @@ PROTOTYPE_RULE_DATA = {
             ("QG3.3:CP_EXISTENCE", "CP", "ai-exist", "Control plan", "CP/控制计划", "输出初版文件", "summary_file", "MP"),
             ("QG3.3:TOOLING_ACCEPTANCE", "设备/工装验收报告", "ai-exist", " 输出部分工装验收报告", "工装验收", "先命中字眼；含字眼文件存在即满足", "single_template", "PT/TE"),
             ("QG3.3:POKAYOKE_COVERAGE", "防错覆盖率分析表", "ai-content", "Pokayoke清单", "防错覆盖率", "输出初版防错覆盖率分析表", "single_template", "PT"),
+            ("QG3.3:FUNCTION_COVERAGE", "功能覆盖率", "ai-exist", "功能覆盖率报告", "功能覆盖率", "输出初版功能覆盖率报告", "single_template", "TE"),
         ],
         "manual": [
             ("QG3.3:DEFECT_RATE", "不良率", "不良率是否达标？", "PT"),
@@ -83,14 +86,12 @@ PROTOTYPE_RULE_DATA = {
             ("QG3:NUDD_CLOSED", "制造过程新颖性变更", "ai-content", "新工艺，新零件过程认可", "", "风险项100% 关闭？", "folder_non_empty", "MP"),
             ("QG3:FLOW_CHART_FRESHNESS", "流程图", "ai-content", "Flow chart", "FC/工艺流程图/流程图", "文件有无更新？", "freshness_check", "PT"),
             ("QG3:PFMEA_FRESHNESS", "PFMEA", "ai-content", "PFMEA", "PFMEA", "确认是否有更新？", "freshness_check", "MP"),
-            ("QG3:CP_FRESHNESS", "CP", "ai-content", "Control plan", "CP/控制计划", "文件是否更新？", "summary_file", "MP"),
-            ("QG3:PATS_CP_CONSISTENCY", "PATS与CP一致性确认", "ai-content", "PATS / Control plan", "PATS/CP/控制计划", "PATS参数与CP是否一致？", "summary_file", "MP"),
+            ("QG3:CP_FRESHNESS", "CP", "ai-content", "Control plan", "CP/控制计划", "文件是否更新？", "freshness_check", "MP"),
             ("QG3:TOOLING_ACCEPTANCE", "设备/工装验收报告", "ai-exist", "装配工装和配件release file", "工装验收", "输出所有工装设备验收报告", "single_template", "PT/TE"),
             ("QG3:POKAYOKE_COVERAGE", "防错覆盖率分析表", "ai-content", "Pokayoke清单", "防错覆盖率", "防错覆盖率100%（除了包装和打螺丝工位）", "single_template", "PT"),
             ("QG3:PROCESS_POKAYOKE_LIST", "过程防错清单", "ai-exist", "Poka yoke清单", "过程防错清单", "发布生产过程防错清单", "single_template", "PT"),
             ("QG3:FUNCTION_COVERAGE", "功能覆盖率", "ai-content", "功能覆盖率报告", "功能覆盖率", "功能测试100%覆盖过往问题库、PTS、产品Spec、防错清单中的项目", "single_template", "TE"),
             ("QG3:AOI_COVERAGE", "贴片元件AOI测试覆盖率分析表", "ai-exist", "SMD贴片元件AOI覆盖率报告", "覆盖率", "输出元件AOI测试覆盖率分析表", "single_template", "TE"),
-            ("QG3:NEW_PROCESS_APPROVAL_REPORT", "过程特殊特性", "ai-exist", "", "", " SC清单是的管控方法验证是否可行？比如SPC管控方法的CPK能力合格", "folder_non_empty", "MP"),
         ],
         "manual": [
             ("QG3:DEFECT_RATE", "不良率", "不良率是否达标？", "PT"),
@@ -99,6 +100,7 @@ PROTOTYPE_RULE_DATA = {
             ("QG3:MSA_REPORT", "MSA报告", " MSA报告符合要求", "TE"),
             ("QG3:HISTORY_ISSUES", "过往问题点", "措施是否100%落实？", "MQD"),
             ("QG3:MES", "MES", "工程师人工核查", "TE"),
+            ("QG3:PATS_CP_CONSISTENCY", "PATS与CP一致性确认", "文件内容核对机型、参数、工序等", "MP"),
         ],
     },
     "QG4": {
@@ -106,7 +108,6 @@ PROTOTYPE_RULE_DATA = {
             ("QG4:PIL", "PIL问题", "system", "QMS 系统", "", "关闭率：100%不允许有红/黄/蓝/紫问题", "single_template", "MP"),
             ("QG4:PFMEA_FRESHNESS", "PFMEA", "ai-content", "PFMEA", "PFMEA", "确认是否在PLM系统进行更新？", "freshness_check", "MP"),
             ("QG4:UCM_SOP_FA", "量产SOP", "system", "UCM 系统", "绘图总号", "输出终版文件", "single_template", "MP"),
-            ("QG4:PLM_THREE_DOCS_RELEASE", "三大文件在PLM系统发布", "system", "PLM 系统", "", "确认是否完成PLM系统发布", "single_template", "MP"),
             ("QG4:POKAYOKE_FUNCTION_CHECK", "防错功能检查表", "ai-exist", "Poka yoke清单", "防错功能检查表", "发布防错功能检查表", "single_template", "PT"),
             ("QG4:COMPONENT_COVERAGE", "元件覆盖率", "ai-exist", "SMD贴片元件AOI测试覆盖率报告", "覆盖率", "完成元件覆盖率表中ICT部分", "single_template", "TE"),
             ("QG4:NEW_PROCESS_APPROVAL_REPORT", "新工艺过程认可报告", "ai-exist", "新工艺，新零件过程认可", "", "输出新工艺的过程认可报告", "folder_non_empty", "MP"),
@@ -127,13 +128,14 @@ PROTOTYPE_RULE_DATA = {
             ("QG4:CP_MANUAL", "CP", "确认是否在PLM系统进行更新？", "MP"),
             ("QG4:CP_SOP_SITE_CONSISTENCY", "CP/SOP/现场工艺一致性确认", "问题100%关闭", "MP"),
             ("QG4:MES", "MES", "全功能上线", "TE"),
+            ("QG4:PLM_THREE_DOCS_RELEASE", "三大文件在PLM系统发布", "确认是否完成PLM系统发布", "MP"),
         ],
     },
 }
 
 
-def rule_type_from_prototype(prototype_type: str) -> tuple[str, str]:
-    if prototype_type == "ai-exist":
+def rule_type_from_prototype(prototype_type: str, strategy: str = "") -> tuple[str, str]:
+    if prototype_type == "ai-exist" or strategy in ("freshness_check", "summary_file"):
         return "auto", "file_existence"
     if prototype_type == "ai-content":
         return "auto", "content_check"
@@ -142,12 +144,50 @@ def rule_type_from_prototype(prototype_type: str) -> tuple[str, str]:
     return "manual", "manual"
 
 
+def split_rule_words(value: str) -> list[str]:
+    return [word.strip() for word in re.split(r"[/、,，&＆\s]+", value or "") if word.strip()]
+
+
+def execution_mode_for_rule(check_type: str) -> str:
+    if check_type == "file_existence":
+        return "file_existence"
+    if check_type == "content_check":
+        return "file_content"
+    if check_type == "system_direct":
+        return "system_direct"
+    return check_type
+
+
+def adapter_type_for_rule(prototype_type: str, location: str) -> str:
+    if prototype_type != "system":
+        return "vdrive"
+    if "UCM" in location:
+        return "ucm"
+    if "PLM" in location:
+        return "plm"
+    return "qms"
+
+
+def prototype_execution_config(location: str, keywords: str, requirement: str, strategy: str) -> dict:
+    config = {
+        "folder_keywords": split_rule_words(location),
+        "candidate_keywords": split_rule_words(keywords),
+        "selection_strategy": strategy,
+        "requirement": requirement,
+    }
+    if strategy == "freshness_check":
+        config["freshness_days"] = 60
+    if strategy == "folder_non_empty":
+        config["folder_non_empty"] = True
+    return config
+
+
 def prototype_business_rules_for_node(node_code: str) -> list[dict]:
     groups = PROTOTYPE_RULE_DATA[node_code]
     rules = []
     sort_order = 1
-    for rule_code, item_name, prototype_type, _location, _keywords, requirement, _strategy, owner in groups["ai"]:
-        item_type, check_type = rule_type_from_prototype(prototype_type)
+    for rule_code, item_name, prototype_type, location, keywords, requirement, strategy, owner in groups["ai"]:
+        item_type, check_type = rule_type_from_prototype(prototype_type, strategy)
         rules.append(
             {
                 "rule_code": rule_code,
@@ -157,16 +197,22 @@ def prototype_business_rules_for_node(node_code: str) -> list[dict]:
                 "checklist_requirement": requirement,
                 "owner_dept": owner,
                 "sort_order": sort_order,
+                "execution_rule": {
+                    "execution_mode": execution_mode_for_rule(check_type),
+                    "adapter_type": adapter_type_for_rule(prototype_type, location),
+                    "config_json": prototype_execution_config(location, keywords, requirement, strategy),
+                },
             }
         )
         sort_order += 1
     for rule_code, item_name, requirement, owner in groups["manual"]:
+        item_type = "inherit" if rule_code.startswith("QG4:INHERIT_") else "manual"
         rules.append(
             {
                 "rule_code": rule_code,
                 "item_name": item_name,
-                "item_type": "manual",
-                "check_type": "manual",
+                "item_type": item_type,
+                "check_type": item_type,
                 "checklist_requirement": requirement,
                 "owner_dept": owner,
                 "sort_order": sort_order,
@@ -190,18 +236,27 @@ def seed_prototype_rules() -> None:
             )
         }
         for rule in prototype_business_rules_for_node(node_code):
+            existing_rule = None
             if rule["rule_code"] in existing_rule_codes:
-                continue
-            insert_prototype_business_rule(
-                version["id"],
-                rule["rule_code"],
-                rule["item_name"],
-                rule["item_type"],
-                rule["check_type"],
-                rule["checklist_requirement"],
-                rule["owner_dept"],
-                rule["sort_order"],
-            )
+                existing_rule = query_one(
+                    "SELECT * FROM business_check_rules WHERE business_rule_version_id = ? AND rule_code = ?",
+                    (version["id"], rule["rule_code"]),
+                )
+            else:
+                rule_id = insert_prototype_business_rule(
+                    version["id"],
+                    rule["rule_code"],
+                    rule["item_name"],
+                    rule["item_type"],
+                    rule["check_type"],
+                    rule["checklist_requirement"],
+                    rule["owner_dept"],
+                    rule["sort_order"],
+                )
+                existing_rule = query_one("SELECT * FROM business_check_rules WHERE id = ?", (rule_id,))
+            execution_rule = rule.get("execution_rule")
+            if execution_rule and existing_rule and existing_rule["item_type"] in ("auto", "system"):
+                ensure_prototype_execution_rule(existing_rule["id"], execution_rule)
 
 
 def get_or_create_prototype_rule_version(qg_node_id: int, node_code: str) -> dict:
@@ -267,6 +322,26 @@ def insert_prototype_business_rule(
         ),
     )
     return int(result.lastrowid)
+
+
+def ensure_prototype_execution_rule(rule_id: int, execution_rule: dict) -> None:
+    if query_one("SELECT id FROM auto_check_execution_rules WHERE business_check_rule_id = ?", (rule_id,)):
+        return
+    execute(
+        """
+        INSERT INTO auto_check_execution_rules(
+            business_check_rule_id, execution_mode, adapter_type,
+            config_json, is_enabled, created_by
+        ) VALUES (?, ?, ?, ?, 1, ?)
+        """,
+        (
+            rule_id,
+            execution_rule["execution_mode"],
+            execution_rule["adapter_type"],
+            to_json(execution_rule.get("config_json", {})),
+            1,
+        ),
+    )
 
 
 def seed_database() -> None:

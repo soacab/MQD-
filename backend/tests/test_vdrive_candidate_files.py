@@ -36,7 +36,14 @@ class VDriveCandidateFileTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
 
-    def _create_auto_task(self, config_json: dict | None = None) -> int:
+    def _create_auto_task(
+        self,
+        config_json: dict | None = None,
+        *,
+        check_type: str = "file_existence",
+        execution_mode: str = "file_existence",
+        adapter_type: str = "vdrive",
+    ) -> int:
         self.task_counter += 1
         project = self.client.post(
             "/api/v1/projects",
@@ -63,8 +70,8 @@ class VDriveCandidateFileTest(unittest.TestCase):
             json={
                 "rule_code": "PFMEA_FILE",
                 "item_name": "PFMEA file checklist",
-                "item_type": "auto",
-                "check_type": "file_existence",
+                "item_type": "system" if execution_mode == "system_direct" else "auto",
+                "check_type": check_type,
                 "checklist_requirement": "PFMEA evidence file exists.",
                 "owner_dept": "MQD",
                 "sort_order": 1,
@@ -75,8 +82,8 @@ class VDriveCandidateFileTest(unittest.TestCase):
             f"/api/v1/business-check-rules/{rule.json()['data']['id']}/auto-check-execution-rules",
             headers=self.headers,
             json={
-                "execution_mode": "file_existence",
-                "adapter_type": "vdrive",
+                "execution_mode": execution_mode,
+                "adapter_type": adapter_type,
                 "is_enabled": True,
                 "config_json": config_json or {"candidate_keywords": ["PFMEA"]},
             },
@@ -96,6 +103,80 @@ class VDriveCandidateFileTest(unittest.TestCase):
         )
         self.assertEqual(items.status_code, 200, items.text)
         return items.json()["data"]["items"][0]["id"]
+
+    def test_task_creation_runs_file_existence_scan_without_mock_auto_result(self):
+        item_id = self._create_auto_task({"candidate_keywords": ["PFMEA_V3"]})
+
+        item = self.client.get(f"/api/v1/inspection-items/{item_id}", headers=self.headers)
+        self.assertEqual(item.status_code, 200, item.text)
+        self.assertEqual(item.json()["data"]["status"], "auto_completed")
+        results = self.client.get(f"/api/v1/inspection-items/{item_id}/auto-check-results", headers=self.headers)
+        self.assertEqual(results.status_code, 200, results.text)
+        latest = results.json()["data"]["items"][-1]
+        self.assertEqual(latest["auto_status"], "success")
+        self.assertEqual(latest["auto_result"], "pass")
+        self.assertNotIn("Mock adapter", latest["evidence_text"])
+        self.assertEqual(latest["candidate_files"][0]["file_name"], "PFMEA_V3.xlsx")
+
+    def test_task_creation_marks_stale_freshness_file_failed_but_waits_for_engineer_confirmation(self):
+        item_id = self._create_auto_task({"candidate_keywords": ["PFMEA_V2"], "freshness_days": 1})
+
+        item = self.client.get(f"/api/v1/inspection-items/{item_id}", headers=self.headers)
+        self.assertEqual(item.status_code, 200, item.text)
+        self.assertEqual(item.json()["data"]["status"], "auto_completed")
+        self.assertIsNone(item.json()["data"]["final_result"])
+        results = self.client.get(f"/api/v1/inspection-items/{item_id}/auto-check-results", headers=self.headers)
+        self.assertEqual(results.status_code, 200, results.text)
+        latest = results.json()["data"]["items"][-1]
+        self.assertEqual(latest["auto_status"], "success")
+        self.assertEqual(latest["auto_result"], "fail")
+        self.assertIn("超过 1 天", latest["evidence_text"])
+
+    def test_task_creation_degrades_content_and_system_direct_checks_to_manual_required(self):
+        content_item_id = self._create_auto_task(
+            {"candidate_keywords": ["PFMEA"], "manual_reason": "文件内容解析暂未接入"},
+            check_type="content_check",
+            execution_mode="file_content",
+        )
+        system_item_id = self._create_auto_task(
+            {"target_system": "QMS", "manual_reason": "QMS 直连暂未接入"},
+            check_type="system_direct",
+            execution_mode="system_direct",
+            adapter_type="qms",
+        )
+
+        for item_id, expected_text in (
+            (content_item_id, "文件内容解析暂未接入"),
+            (system_item_id, "QMS 直连暂未接入"),
+        ):
+            item = self.client.get(f"/api/v1/inspection-items/{item_id}", headers=self.headers)
+            self.assertEqual(item.status_code, 200, item.text)
+            self.assertEqual(item.json()["data"]["status"], "manual_required")
+            results = self.client.get(f"/api/v1/inspection-items/{item_id}/auto-check-results", headers=self.headers)
+            self.assertEqual(results.status_code, 200, results.text)
+            latest = results.json()["data"]["items"][-1]
+            self.assertEqual(latest["auto_status"], "manual_required")
+            self.assertEqual(latest["auto_result"], "manual_required")
+            self.assertIn(expected_text, latest["evidence_text"])
+
+    def test_task_creation_degrades_auto_checks_when_auto_check_setting_is_disabled(self):
+        from app.core.database import execute, to_json
+        from app.core.enums import SystemSettingKey
+
+        execute(
+            "UPDATE system_settings SET value_json = ? WHERE key = ?",
+            (to_json(False), SystemSettingKey.AUTO_CHECK_ENABLED),
+        )
+        item_id = self._create_auto_task({"candidate_keywords": ["PFMEA_V3"]})
+
+        item = self.client.get(f"/api/v1/inspection-items/{item_id}", headers=self.headers)
+        self.assertEqual(item.status_code, 200, item.text)
+        self.assertEqual(item.json()["data"]["status"], "manual_required")
+        results = self.client.get(f"/api/v1/inspection-items/{item_id}/auto-check-results", headers=self.headers)
+        self.assertEqual(results.status_code, 200, results.text)
+        latest = results.json()["data"]["items"][-1]
+        self.assertEqual(latest["auto_status"], "manual_required")
+        self.assertIn("自动检查开关已关闭", latest["evidence_text"])
 
     def test_mock_vdrive_lists_files_recursively_with_vdrive_field_mapping(self):
         from app.vdrive import MockVDriveAdapter

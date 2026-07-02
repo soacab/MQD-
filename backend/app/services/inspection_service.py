@@ -158,6 +158,7 @@ def create_inspection_task_for_project(project_id: int, qg_node_id: int, user: d
         raise BusinessError("ACTIVE_TASK_EXISTS", "同项目同节点已有进行中或整改中任务")
 
     temporary_task_no = f"IT-PENDING-{uuid4().hex}"
+    pending_auto_item_ids: list[int] = []
     with transaction():
         cur = execute(
             """
@@ -184,7 +185,7 @@ def create_inspection_task_for_project(project_id: int, qg_node_id: int, user: d
             (task_id, InspectionRoundStatus.RUNNING),
         )
         round_id = round_cur.lastrowid
-        generate_items_for_round(task_id, round_id, business_snapshot, execution_snapshot)
+        pending_auto_item_ids = generate_items_for_round(task_id, round_id, business_snapshot, execution_snapshot)
         report_cur = execute(
             """
             INSERT INTO inspection_reports(
@@ -195,6 +196,7 @@ def create_inspection_task_for_project(project_id: int, qg_node_id: int, user: d
             (task_id, project["id"], qg_node_id, f"REP-{task_id}", version["version_no"], user["id"]),
         )
         audit("create_inspection_task", "inspection_task", task_id, user["id"], audit_payload)
+    run_auto_checks_for_items(pending_auto_item_ids)
     return {
         "inspection_task_id": task_id,
         "project_id": project["id"],
@@ -219,8 +221,9 @@ def create_inspection_task(payload: dict[str, Any], user: dict[str, Any]) -> dic
         return create_inspection_task_for_project(project_id, int(payload["qg_node_id"]), user, payload)
 
 
-def generate_items_for_round(task_id: int, round_id: int, business_snapshot: list[dict[str, Any]], execution_snapshot: list[dict[str, Any]], only_rule_codes: set[str] | None = None) -> None:
+def generate_items_for_round(task_id: int, round_id: int, business_snapshot: list[dict[str, Any]], execution_snapshot: list[dict[str, Any]], only_rule_codes: set[str] | None = None) -> list[int]:
     execution_rules_by_business_rule_id = {row["business_check_rule_id"]: row for row in execution_snapshot}
+    pending_auto_item_ids: list[int] = []
     for rule in business_snapshot:
         if only_rule_codes is not None and rule["rule_code"] not in only_rule_codes:
             continue
@@ -258,7 +261,15 @@ def generate_items_for_round(task_id: int, round_id: int, business_snapshot: lis
             ),
         )
         if status == InspectionItemStatus.PENDING:
-            ai_execution_service.run_mock_auto_check(cur.lastrowid, execution_rules_by_business_rule_id[rule["id"]])
+            pending_auto_item_ids.append(cur.lastrowid)
+    return pending_auto_item_ids
+
+
+def run_auto_checks_for_items(item_ids: list[int]) -> None:
+    for item_id in item_ids:
+        item = query_one("SELECT * FROM inspection_items WHERE id = ?", (item_id,))
+        if item:
+            ai_execution_service.run_auto_check_for_item(item)
 
 
 def list_inspection_tasks(status: str | None, project_id: int | None, user: dict[str, Any]) -> dict[str, Any]:
@@ -615,7 +626,7 @@ def retry_auto_check(item_id: int, user: dict[str, Any]) -> dict[str, Any]:
     item = require_item_scope(user, item_id)
     ensure_item_mutable(item)
     ensure_item_auto_checkable(item)
-    result = ai_execution_service.scan_candidate_files(item)
+    result = ai_execution_service.run_auto_check_for_item(item)
     audit("retry_auto_check", "inspection_item", item_id, user["id"], {"auto_check_result_id": result["id"]})
     return result
 
@@ -859,9 +870,10 @@ def trigger_recheck(task_id: int, user: dict[str, Any]) -> dict[str, Any]:
         snapshot = query_one("SELECT * FROM rule_snapshots WHERE inspection_task_id = ?", (task_id,))
         business_snapshot = from_json(snapshot["business_rule_snapshot_json"], [])
         execution_snapshot = from_json(snapshot["auto_check_execution_rule_snapshot_json"], [])
-        generate_items_for_round(task_id, round_cur.lastrowid, business_snapshot, execution_snapshot, {item["source_rule_code"] for item in fail_items})
+        pending_auto_item_ids = generate_items_for_round(task_id, round_cur.lastrowid, business_snapshot, execution_snapshot, {item["source_rule_code"] for item in fail_items})
         execute("UPDATE inspection_tasks SET status = ?, current_round_no = ?, last_operated_at = CURRENT_TIMESTAMP WHERE id = ?", (InspectionTaskStatus.RUNNING, new_round_no, task_id))
         audit("trigger_recheck", "inspection_task", task_id, user["id"], {"new_round_no": new_round_no})
+    run_auto_checks_for_items(pending_auto_item_ids)
     return {
         "inspection_task_id": task_id,
         "task_status": InspectionTaskStatus.RUNNING.value,

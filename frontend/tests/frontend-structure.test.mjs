@@ -304,13 +304,54 @@ describe("frontend structure", () => {
       "确认发布规则版本",
       "当前版本",
       "新增人工检查项",
-      "提交升级建议",
+      "保存修改",
+      "检查项修改已保存到未发布草稿",
+      "canSubmitUpgradeSuggestion",
+      "formatRuleFieldChangeLine",
+      "formatRuleFieldValue",
+      "old_value",
+      "new_value",
+      "ruleFormDirtyFields",
+      "rulePatchFromDirtyFields",
+      "updateRuleFormField",
+      "当前没有可发布的规则变更",
+      "未检测到字段变化，无需发布规则版本",
+      "selectedNodeHasPublishableDraft",
+      "有待发布规则变更",
       "删除检查项",
       "关闭",
       "未发布规则变更"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should contain ${snippet}`);
     }
+
+    assert.doesNotMatch(
+      rulesPage,
+      /提交升级建议已保存到未发布草稿/,
+      "rules page should not use upgrade suggestion copy for normal rule edits"
+    );
+    assert.doesNotMatch(
+      rulesPage,
+      /无字段变化，仅发布版本状态/,
+      "rules page should not describe empty drafts as publishable version status changes"
+    );
+    assert.doesNotMatch(
+      rulesPage,
+      /有未发布的修改/,
+      "rules page should not show empty draft versions as pending changes"
+    );
+    assert.ok(
+      rulesPage.includes('editingRuleSource?.item_type === "manual" && Boolean(editingRuleId)'),
+      "rules page should limit upgrade suggestion entry to existing manual rules"
+    );
+    assert.ok(
+      rulesPage.includes("await ensureEditableVersion(editingRuleSource || undefined)"),
+      "rules page should prepare editable drafts when saving edits, not when opening the edit modal"
+    );
+    assert.ok(
+      rulesPage.includes("version.id}-${item.rule_code}-${detail.field}"),
+      "rules page should show field-level old/new details in version history"
+    );
 
     for (const forbidden of [
       "检查项编码",
@@ -333,8 +374,8 @@ describe("frontend structure", () => {
       "nodeRuleCounts",
       "published_rule_count",
       "draftVersion",
-      "canManageRules && draftVersion",
-      "有未发布的修改"
+      "selectedNodeHasPublishableDraft",
+      "有待发布规则变更"
     ]) {
       assert.match(rulesPage, new RegExp(snippet.replaceAll("(", "\\(")), `rules page should keep ${snippet}`);
     }
