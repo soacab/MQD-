@@ -1,5 +1,8 @@
+import { clearSession } from "@/lib/session";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 const SESSION_TOKEN_KEY = "checkflow_access_token";
+const PUBLIC_AUTH_PATHS = ["/api/v1/auth/login", "/api/v1/auth/iam/login-url", "/api/v1/auth/iam/callback"];
 
 export type ApiResponse<T> = {
   success: boolean;
@@ -420,6 +423,20 @@ function readBrowserToken(): string | null {
   return window.localStorage.getItem(SESSION_TOKEN_KEY);
 }
 
+function isPublicAuthPath(path: string): boolean {
+  return PUBLIC_AUTH_PATHS.some((publicPath) => path === publicPath || path.startsWith(`${publicPath}?`));
+}
+
+function handleUnauthorized(path: string, status: number): void {
+  if (status !== 401 || isPublicAuthPath(path) || typeof window === "undefined") {
+    return;
+  }
+  clearSession();
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login";
+  }
+}
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const token = options.token === undefined ? readBrowserToken() : options.token;
@@ -441,6 +458,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   };
 
   if (!response.ok || payload.success === false) {
+    handleUnauthorized(path, response.status);
     throw new ApiError(
       payload.error?.message || payload.message || `HTTP ${response.status}`,
       response.status,

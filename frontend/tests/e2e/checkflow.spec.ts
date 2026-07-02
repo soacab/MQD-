@@ -26,6 +26,19 @@ async function fulfillJson(route: Route, data: unknown) {
   });
 }
 
+async function fulfillUnauthorized(route: Route) {
+  await route.fulfill({
+    status: 401,
+    contentType: "application/json",
+    body: JSON.stringify({
+      success: false,
+      data: null,
+      error: { code: "UNAUTHORIZED", message: "用户不存在或已停用" },
+      message: "用户不存在或已停用"
+    })
+  });
+}
+
 async function mockDashboardApi(page: Page) {
   await page.route("**/health", async (route) => {
     await fulfillJson(route, { status: "ok" });
@@ -159,6 +172,53 @@ test("local login saves the browser session and opens the workbench", async ({ p
   await expect
     .poll(() => page.evaluate(() => window.localStorage.getItem("checkflow_access_token")))
     .toBe(token);
+  await expect
+    .poll(() => page.evaluate(() => JSON.parse(window.localStorage.getItem("checkflow_current_user") || "{}").uid))
+    .toBe("UID10001");
+});
+
+test("protected API 401 clears stale session and redirects to login", async ({ page }) => {
+  await page.addInitScript(
+    ([sessionToken, currentUser]) => {
+      if (window.sessionStorage.getItem("checkflow_stale_session_seeded")) {
+        return;
+      }
+      window.sessionStorage.setItem("checkflow_stale_session_seeded", "1");
+      window.localStorage.setItem("checkflow_access_token", sessionToken);
+      window.localStorage.setItem("checkflow_current_user", JSON.stringify(currentUser));
+    },
+    [token, user]
+  );
+  await page.route("**/health", async (route) => {
+    await fulfillJson(route, { status: "ok" });
+  });
+  await page.route("**/api/v1/dashboard/**", async (route) => {
+    expect(route.request().headers().authorization).toBe(`Bearer ${token}`);
+    await fulfillUnauthorized(route);
+  });
+
+  await page.goto("/");
+
+  await expect(page).toHaveURL("/login");
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("checkflow_access_token"))).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("checkflow_current_user"))).toBeNull();
+});
+
+test("local login 401 keeps the login error visible without clearing session", async ({ page }) => {
+  await mockLoggedInSession(page);
+  await page.route("**/api/v1/auth/login", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    await fulfillUnauthorized(route);
+  });
+
+  await page.goto("/login");
+  await page.getByLabel("UID").fill("UID10001");
+  await page.getByLabel("密码").fill("wrong-password");
+  await page.getByRole("button", { name: "登录进入" }).click();
+
+  await expect(page).toHaveURL("/login");
+  await expect(page.getByRole("status")).toContainText("用户不存在或已停用");
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("checkflow_access_token"))).toBe(token);
   await expect
     .poll(() => page.evaluate(() => JSON.parse(window.localStorage.getItem("checkflow_current_user") || "{}").uid))
     .toBe("UID10001");
