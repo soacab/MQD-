@@ -240,6 +240,10 @@ class VDriveCandidateFileTest(unittest.TestCase):
         self.assertEqual(len(scan.json()["data"]["candidate_files"]), 2)
         item = self.client.get(f"/api/v1/inspection-items/{item_id}", headers=self.headers)
         self.assertEqual(item.json()["data"]["status"], "candidate_waiting")
+        overview = self.client.get("/api/v1/dashboard/overview", headers=self.headers)
+        self.assertEqual(overview.status_code, 200, overview.text)
+        self.assertEqual(overview.json()["data"]["candidate_waiting_count"], 1)
+        self.assertEqual(overview.json()["data"]["manual_required_count"], 0)
 
         candidates = self.client.get(f"/api/v1/inspection-items/{item_id}/candidate-files", headers=self.headers)
         self.assertEqual(candidates.status_code, 200, candidates.text)
@@ -277,6 +281,9 @@ class VDriveCandidateFileTest(unittest.TestCase):
         self.assertEqual(no_candidate.status_code, 200, no_candidate.text)
         self.assertEqual(no_candidate.json()["data"]["auto_status"], "manual_required")
         self.assertEqual(no_candidate.json()["data"]["auto_result"], "not_found")
+        overview = self.client.get("/api/v1/dashboard/overview", headers=self.headers)
+        self.assertEqual(overview.status_code, 200, overview.text)
+        self.assertEqual(overview.json()["data"]["manual_required_count"], 1)
 
         error_item_id = self._create_auto_task({"candidate_keywords": ["PFMEA_V3"]})
         with patch("app.services.ai_execution_service.list_vdrive_files_for_item", side_effect=RuntimeError("VDrive timeout")):

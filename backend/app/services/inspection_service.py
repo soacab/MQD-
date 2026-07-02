@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any
 from uuid import uuid4
 
@@ -333,6 +334,47 @@ def dashboard_auto_check_status(task_id: int, progress: dict[str, int]) -> dict[
     return {"label": "自动检查处理中", "value": "等待结果", "tone": "pending"}
 
 
+def unfinished_inspection_item_id(task_id: int) -> int | None:
+    item = query_one(
+        """
+        SELECT id FROM inspection_items
+        WHERE inspection_task_id = ? AND status NOT IN (?, ?)
+        ORDER BY inspection_round_id DESC, sort_order, id
+        LIMIT 1
+        """,
+        (task_id, InspectionItemStatus.CONFIRMED, InspectionItemStatus.INHERITED),
+    )
+    return item["id"] if item else None
+
+
+def report_id_for_task(task_id: int) -> int | None:
+    report = query_one("SELECT id FROM inspection_reports WHERE inspection_task_id = ?", (task_id,))
+    return report["id"] if report else None
+
+
+def due_status(planned_finish_date: str | None) -> str:
+    if not planned_finish_date:
+        return "none"
+    try:
+        due = date.fromisoformat(planned_finish_date[:10])
+    except ValueError:
+        return "none"
+    today = date.today()
+    if due < today:
+        return "overdue"
+    if due == today:
+        return "due_today"
+    return "open"
+
+
+def count_items_by_status(tasks: list[dict[str, Any]], status: InspectionItemStatus) -> int:
+    task_ids = {task["id"] for task in tasks}
+    if not task_ids:
+        return 0
+    items = query_all("SELECT inspection_task_id, status FROM inspection_items")
+    return len([item for item in items if item["inspection_task_id"] in task_ids and item["status"] == status])
+
+
 def rectification_progress(task_id: int) -> dict[str, int]:
     items = query_all("SELECT marked_done_at FROM rectification_items WHERE inspection_task_id = ?", (task_id,))
     done = len([item for item in items if item["marked_done_at"]])
@@ -358,11 +400,15 @@ def dashboard_task_card(task: dict[str, Any], todo_type: str) -> dict[str, Any]:
         "type": todo_type,
         "target_id": task["id"],
         "task_id": task["id"],
+        "inspection_item_id": unfinished_inspection_item_id(task["id"]),
+        "source_item_id": None,
+        "report_id": report_id_for_task(task["id"]),
         "project_id": task["project_id"],
         "project_name": project["project_name"] if project else "",
         "qg_node": qg_node["node_code"] if qg_node else "",
         "status": task["status"],
         "href": f"/inspection?task_id={task['id']}",
+        "due_status": "none",
         "summary": f"{progress['confirmed']}/{progress['total']} 项已确认",
         "round_label": f"第{task['current_round_no'] + 1}轮检查待启动" if todo_type == "recheck_task" else f"第{task['current_round_no']}轮检查",
         "confirmed_count": progress["confirmed"],
@@ -411,18 +457,30 @@ def dashboard_overview(user: dict[str, Any]) -> dict[str, Any]:
     followups = filter_task_scoped_rows(query_all("SELECT * FROM followup_items ORDER BY id"), user)
 
     running = [task for task in tasks if task["status"] == InspectionTaskStatus.RUNNING]
+    rectifying = [task for task in tasks if task["status"] == InspectionTaskStatus.RECTIFYING]
+    completed = [task for task in tasks if task["status"] == InspectionTaskStatus.COMPLETED]
     archive_ready = []
     for task in running:
         progress = task_progress(task["id"])
         if progress["total"] > 0 and progress["pending"] == 0:
             archive_ready.append(task)
 
+    open_rectifications = [item for item in rectifications if not item["marked_done_at"]]
+    open_followups = [item for item in followups if not item["closed_at"]]
+
     return {
         "running_count": len(running),
-        "recheck_count": len([task for task in tasks if task["status"] == InspectionTaskStatus.RECTIFYING]),
-        "rectification_count": len([item for item in rectifications if not item["marked_done_at"]]),
-        "followup_count": len([item for item in followups if not item["closed_at"]]),
+        "recheck_count": len(rectifying),
+        "rectification_count": len(open_rectifications),
+        "followup_count": len(open_followups),
         "archive_ready_count": len(archive_ready),
+        "running_task_count": len(running),
+        "rectifying_task_count": len(rectifying),
+        "completed_task_count": len(completed),
+        "overdue_rectification_count": len([item for item in open_rectifications if due_status(item["planned_finish_date"]) == "overdue"]),
+        "overdue_followup_count": len([item for item in open_followups if due_status(item["planned_finish_date"]) == "overdue"]),
+        "candidate_waiting_count": count_items_by_status(tasks, InspectionItemStatus.CANDIDATE_WAITING),
+        "manual_required_count": count_items_by_status(tasks, InspectionItemStatus.MANUAL_REQUIRED),
     }
 
 
@@ -445,12 +503,16 @@ def dashboard_my_todos(user: dict[str, Any]) -> dict[str, Any]:
                     "type": "rectification_item",
                     "target_id": item["id"],
                     "task_id": item["inspection_task_id"],
+                    "inspection_item_id": None,
+                    "source_item_id": item["source_item_id"],
+                    "report_id": report_id_for_task(item["inspection_task_id"]),
                     "project_id": item["project_id"],
                     "project_name": context.get("project_name", ""),
                     "qg_node": context.get("qg_node", ""),
                     "title": item["item_name_snapshot"],
                     "status": "pending",
                     "href": f"/rectification?task_id={item['inspection_task_id']}",
+                    "due_status": due_status(item["planned_finish_date"]),
                     "summary": f"整改责任人：{item['responsible_owner']}",
                     "planned_finish_date": item["planned_finish_date"],
                     "round_label": f"第{context.get('current_round_no', 1)}轮检查待启动",
@@ -471,12 +533,16 @@ def dashboard_my_todos(user: dict[str, Any]) -> dict[str, Any]:
                     "type": "followup_item",
                     "target_id": item["id"],
                     "task_id": item["inspection_task_id"],
+                    "inspection_item_id": None,
+                    "source_item_id": item["source_item_id"],
+                    "report_id": report_id_for_task(item["inspection_task_id"]),
                     "project_id": item["project_id"],
                     "project_name": context.get("project_name", ""),
                     "qg_node": context.get("qg_node", ""),
                     "title": item["item_name_snapshot"],
                     "status": "pending",
                     "href": f"/rectification?task_id={item['inspection_task_id']}",
+                    "due_status": due_status(item["planned_finish_date"]),
                     "summary": f"待跟进责任人：{item['responsible_owner']}",
                     "planned_finish_date": item["planned_finish_date"],
                     "round_label": f"第{context.get('current_round_no', 1)}轮检查",

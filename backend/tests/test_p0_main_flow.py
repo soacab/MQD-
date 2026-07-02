@@ -227,8 +227,16 @@ class P0MainFlowTest(unittest.TestCase):
 
         overview = self.client.get("/api/v1/dashboard/overview", headers=self.headers)
         self.assertEqual(overview.status_code, 200, overview.text)
-        self.assertEqual(overview.json()["data"]["running_count"], 1)
-        self.assertEqual(overview.json()["data"]["archive_ready_count"], 0)
+        overview_data = overview.json()["data"]
+        self.assertEqual(overview_data["running_count"], 1)
+        self.assertEqual(overview_data["archive_ready_count"], 0)
+        self.assertEqual(overview_data["running_task_count"], 1)
+        self.assertEqual(overview_data["rectifying_task_count"], 0)
+        self.assertEqual(overview_data["completed_task_count"], 0)
+        self.assertEqual(overview_data["overdue_rectification_count"], 0)
+        self.assertEqual(overview_data["overdue_followup_count"], 0)
+        self.assertEqual(overview_data["candidate_waiting_count"], 0)
+        self.assertEqual(overview_data["manual_required_count"], 1)
 
         todos = self.client.get("/api/v1/dashboard/my-todos", headers=self.headers)
         self.assertEqual(todos.status_code, 200, todos.text)
@@ -245,6 +253,13 @@ class P0MainFlowTest(unittest.TestCase):
         self.assertEqual(task_row["mq_user_uid"], "admin")
         self.assertIn("last_operated_at", task_row)
         self.assertEqual(task_row["auto_check_status"]["label"], "自动检查处理中")
+        current_items = self.client.get(f"/api/v1/inspection-tasks/{task_id}/current-round/items", headers=self.headers)
+        self.assertEqual(current_items.status_code, 200, current_items.text)
+        manual_item = next(item for item in current_items.json()["data"]["items"] if item["status"] == "manual_required")
+        self.assertEqual(task_row["inspection_item_id"], manual_item["id"])
+        self.assertIsNone(task_row["source_item_id"])
+        self.assertIsNotNone(task_row["report_id"])
+        self.assertEqual(task_row["due_status"], "none")
 
     def test_confirmed_item_cannot_be_confirmed_again(self):
         project_id, version_id, auto_rule_id = self._create_project_and_rules()
@@ -401,7 +416,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "decision_result": "fail",
                 "decision_text": "Needs rectification.",
                 "responsible_owner": "MQD",
-                "planned_finish_date": "2026-07-15",
+                "planned_finish_date": "2000-01-01",
             },
         )
         self.assertEqual(fail_confirm.status_code, 200, fail_confirm.text)
@@ -413,7 +428,7 @@ class P0MainFlowTest(unittest.TestCase):
                 "decision_text": "Can proceed with follow-up.",
                 "countermeasure": "Track action.",
                 "responsible_owner": "MQD",
-                "planned_finish_date": "2026-07-20",
+                "planned_finish_date": "2999-12-31",
             },
         )
         self.assertEqual(conditional_confirm.status_code, 200, conditional_confirm.text)
@@ -424,7 +439,35 @@ class P0MainFlowTest(unittest.TestCase):
         followups = self.client.get(f"/api/v1/followup-items?task_id={task_id}", headers=self.headers)
         self.assertEqual(followups.status_code, 200, followups.text)
         rectification_id = rectifications.json()["data"]["items"][0]["id"]
+        rectification_source_item_id = rectifications.json()["data"]["items"][0]["source_item_id"]
         followup_id = followups.json()["data"]["items"][0]["id"]
+        followup_source_item_id = followups.json()["data"]["items"][0]["source_item_id"]
+
+        reports = self.client.get(f"/api/v1/reports?project_id={project_id}", headers=self.headers)
+        self.assertEqual(reports.status_code, 200, reports.text)
+        report_id = reports.json()["data"]["items"][0]["id"]
+
+        overview = self.client.get("/api/v1/dashboard/overview", headers=self.headers)
+        self.assertEqual(overview.status_code, 200, overview.text)
+        overview_data = overview.json()["data"]
+        self.assertEqual(overview_data["overdue_rectification_count"], 1)
+        self.assertEqual(overview_data["overdue_followup_count"], 0)
+
+        dashboard = self.client.get("/api/v1/dashboard/my-todos", headers=self.headers)
+        self.assertEqual(dashboard.status_code, 200, dashboard.text)
+        dashboard_rows = dashboard.json()["data"]["items"]
+        rectification_todo = next(row for row in dashboard_rows if row["type"] == "rectification_item")
+        followup_todo = next(row for row in dashboard_rows if row["type"] == "followup_item")
+        self.assertEqual(rectification_todo["source_item_id"], rectification_source_item_id)
+        self.assertIsNone(rectification_todo["inspection_item_id"])
+        self.assertEqual(rectification_todo["report_id"], report_id)
+        self.assertEqual(rectification_todo["due_status"], "overdue")
+        self.assertIn("href", rectification_todo)
+        self.assertEqual(followup_todo["source_item_id"], followup_source_item_id)
+        self.assertIsNone(followup_todo["inspection_item_id"])
+        self.assertEqual(followup_todo["report_id"], report_id)
+        self.assertEqual(followup_todo["due_status"], "open")
+        self.assertIn("href", followup_todo)
 
         marked = self.client.post(f"/api/v1/rectification-items/{rectification_id}/mark-done", headers=self.headers)
         self.assertEqual(marked.status_code, 200, marked.text)
