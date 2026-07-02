@@ -139,3 +139,4 @@ npm run build
 
 - `doc/tasks/progress.md`：MVP 任务总进度、优先级和当前状态总入口。
 - `doc/tasks/`：仅保留仍有执行价值的模块任务文档；已完成且容易误导的历史模块明细页依赖 Git 历史追溯。
+- 已清理的历史模块不再作为执行入口；若模块文件不存在，以 `doc/tasks/progress.md` 中的状态摘要、缺口和下一步为准。

@@ -9,7 +9,7 @@
 - `CheckFlow 后端 API 设计 v0 1.md .md`：Inspection Item API。
 
 ## 前置依赖
-- [x] 08 生成轮次和检查项完成。
+- [x] 生成轮次和检查项最小链路已在 `progress.md` 中标记为可支撑当前模块。
 
 ## 最小任务清单
 - [x] T01：实现 `POST /api/v1/inspection-items/{item_id}/confirm`；验收：可提交 pass、fail、conditional、na。
