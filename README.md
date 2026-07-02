@@ -137,6 +137,5 @@ npm run build
 
 ## 任务文档入口
 
-- `doc/tasks/progress.md`：MVP 任务总进度和优先级。
-- `doc/tasks/00-project-bootstrap.md`：项目初始化和本地启动基础。
-- `doc/tasks/01-database-orm.md`：数据库迁移、ORM 模型和核心约束。
+- `doc/tasks/progress.md`：MVP 任务总进度、优先级和当前状态总入口。
+- `doc/tasks/`：仅保留仍有执行价值的模块任务文档；已完成且容易误导的历史模块明细页依赖 Git 历史追溯。

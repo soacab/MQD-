@@ -100,9 +100,9 @@ git checkout .
 
 ## 任务文档使用规则
 
-`doc/tasks/progress.md` 是开发任务总入口，用于查看模块优先级、依赖顺序和整体进度。执行具体模块前，先读取对应的 `doc/tasks/<module-name>.md`，按其中的目标、前置依赖、最小任务清单和验收标准推进。
+`doc/tasks/progress.md` 是开发任务总入口，用于查看模块优先级、依赖顺序和整体进度。执行具体模块前，先读取 `doc/tasks/progress.md`；如对应的 `doc/tasks/<module-name>.md` 仍存在，再读取模块文件中的目标、前置依赖、最小任务清单和验收标准推进。
 
-完成子任务后，更新对应模块文件中的 checklist；完成整个模块后，再更新 `doc/tasks/progress.md`。P2 暂缓模块只有在 P0/P1 验收完成或用户明确要求时才开始。
+完成子任务后，优先更新仍存在的对应模块文件 checklist；若模块文件已清理，则直接更新 `doc/tasks/progress.md` 中的状态、缺口和下一步。完成整个模块后，必须更新 `doc/tasks/progress.md`。P2 暂缓模块只有在 P0/P1 验收完成或用户明确要求时才开始。
 
 ## Agent 专用说明
 
